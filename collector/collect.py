@@ -88,15 +88,25 @@ def _id_gt(a, b):
     return len(a) > len(b) or (len(a) == len(b) and a > b)
 
 
+_logged_shapes = {}
+
+
 def _getx_to_v2(t, posts, includes):
     """Add one GetXAPI tweet (and any tweet it embeds) to v2-shaped lists. Returns its id."""
-    author = t.get("author") or {}
+    author = t.get("author") or t.get("user") or {}
     if author.get("id"):
-        includes["users"].append({"id": author["id"], "username": author.get("userName", "i"),
+        includes["users"].append({"id": str(author["id"]),
+                                  "username": author.get("userName") or author.get("screen_name") or "i",
                                   "name": author.get("name", "")})
-    created = datetime.strptime(t["createdAt"], "%a %b %d %H:%M:%S %z %Y")
-    v2 = {"id": str(t["id"]), "text": t.get("text", ""), "author_id": author.get("id"),
-          "created_at": created.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+    v2 = {"id": str(t.get("id") or t.get("id_str")), "text": t.get("text") or t.get("full_text") or "",
+          "author_id": str(author["id"]) if author.get("id") else None}
+    # Embedded (quoted/retweeted) objects don't always carry createdAt; only top-level posts need it.
+    raw_date = t.get("createdAt") or t.get("created_at")
+    if raw_date:
+        created = datetime.strptime(raw_date, "%a %b %d %H:%M:%S %z %Y")
+        v2["created_at"] = created.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    elif posts is not None:
+        raise ValueError(f"GetXAPI post {v2['id']} has no createdAt; keys: {sorted(t)}")
     refs = []
     rt = t.get("retweeted_tweet")
     if rt:
@@ -104,6 +114,12 @@ def _getx_to_v2(t, posts, includes):
     elif t.get("text", "").startswith("RT @"):
         v2["_rt_text_only"] = True  # retweet without the original attached; keep the RT text as-is
     qt = t.get("quoted_tweet")
+    if qt and not _logged_shapes.get("quoted"):
+        _logged_shapes["quoted"] = True
+        print(f"GetXAPI quoted_tweet keys: {sorted(qt)}")  # documents the undocumented shape in the run log
+    if rt and not _logged_shapes.get("retweeted"):
+        _logged_shapes["retweeted"] = True
+        print(f"GetXAPI retweeted_tweet keys: {sorted(rt)}")
     if qt:
         refs.append({"type": "quoted", "id": _getx_to_v2(qt, None, includes)})
     if t.get("isReply") and t.get("inReplyToId"):

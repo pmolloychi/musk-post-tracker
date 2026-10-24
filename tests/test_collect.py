@@ -73,7 +73,7 @@ def test_getxapi_conversion(monkeypatch):
         {"id": "1849000000000000021", "createdAt": "Sat Oct 18 06:00:00 +0000 2026", "text": "@alice True", "author": musk,
          "isReply": True, "inReplyToId": "901", "inReplyToUsername": "alice"},
         {"id": "1849000000000000022", "createdAt": "Sat Oct 18 07:00:00 +0000 2026", "text": "Wow", "author": musk,
-         "quoted_tweet": {"id": "902", "createdAt": "Fri Oct 17 05:00:00 +0000 2026", "text": "quoted text", "author": alice}},
+         "quoted_tweet": {"id": "902", "text": "quoted text", "author": alice}},
         {"id": "1849000000000000023", "createdAt": "Sat Oct 18 07:30:00 +0000 2026", "text": "someone else in thread", "author": alice},
     ]}
     old_page = {"has_more": True, "next_cursor": "c3", "tweets": [
