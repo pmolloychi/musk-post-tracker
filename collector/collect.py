@@ -360,7 +360,7 @@ def main():
         return
     backfill_pages = int(os.environ.get("BACKFILL_PAGES") or 0)
     latest = None if backfill_pages else sheet_call("latest_id").get("latest_id")
-    max_pages = backfill_pages or 5
+    max_pages = backfill_pages or (5 if latest else 1)  # an empty sheet starts with the newest page only
     posts, includes = get_posts(latest, max_pages)
     known = set(sheet_call("known_ids").get("ids", [])) if backfill_pages else set()
     posts = [p for p in posts if p["id"] not in known]
