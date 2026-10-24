@@ -36,9 +36,20 @@ MODEL = "claude-opus-5-5"
 
 def sheet_call(action, payload=None):
     body = {"secret": os.environ["SHEET_SECRET"], "action": action, **(payload or {})}
-    r = requests.post(os.environ["SHEET_ENDPOINT"], json=body, timeout=120)
-    r.raise_for_status()
-    data = r.json()
+    # Apps Script sometimes answers with an HTML error page or times out under load. Every collector action
+    # is safe to repeat (append skips IDs it already has), so retry those before giving up.
+    for wait in (10, 30, 90, None):
+        try:
+            r = requests.post(os.environ["SHEET_ENDPOINT"], json=body, timeout=300)
+            r.raise_for_status()
+            data = r.json()
+            break
+        except (requests.RequestException, ValueError) as e:
+            if wait is None:
+                raise
+            snippet = getattr(e, "response", None) is not None and e.response.text[:200] or str(e)[:200]
+            print(f"Sheet endpoint hiccup on {action} ({snippet!r}); retrying in {wait}s")
+            time.sleep(wait)
     if not data.get("ok"):
         raise RuntimeError(f"Sheet endpoint error on {action}: {data}")
     return data
