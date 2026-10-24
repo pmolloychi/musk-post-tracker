@@ -94,12 +94,19 @@ _logged_shapes = {}
 def _getx_to_v2(t, posts, includes):
     """Add one GetXAPI tweet (and any tweet it embeds) to v2-shaped lists. Returns its id."""
     author = t.get("author") or t.get("user") or {}
-    if author.get("id"):
-        includes["users"].append({"id": str(author["id"]),
-                                  "username": author.get("userName") or author.get("screen_name") or "i",
-                                  "name": author.get("name", "")})
+    if author and not _logged_shapes.get("user"):
+        _logged_shapes["user"] = True
+        print(f"GetXAPI embedded user keys: {sorted(author)}")
+    # Embedded quoted posts use a different user object than top-level posts; accept either shape.
+    uid = author.get("id") or author.get("id_str") or author.get("rest_id")
+    uname = (author.get("userName") or author.get("screen_name") or author.get("username")
+             or author.get("user_name") or author.get("handle"))
+    if not uid and uname:
+        uid = "name:" + uname
+    if uid:
+        includes["users"].append({"id": str(uid), "username": uname or "i", "name": author.get("name", "")})
     v2 = {"id": str(t.get("id") or t.get("id_str")), "text": t.get("text") or t.get("full_text") or "",
-          "author_id": str(author["id"]) if author.get("id") else None}
+          "author_id": str(uid) if uid else None}
     # Embedded (quoted/retweeted) objects don't always carry createdAt; only top-level posts need it.
     raw_date = t.get("createdAt") or t.get("created_at")
     if raw_date:
