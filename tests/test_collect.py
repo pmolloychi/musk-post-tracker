@@ -103,3 +103,21 @@ def test_getxapi_conversion(monkeypatch):
     assert rows[0]["context"] == "Retweet of @alice"
     assert rows[2]["context"] == "Quoting @alice: quoted text"
     assert rows[0]["date_ct"] == "2026-10-18 00:00"
+
+def test_backfill_days(monkeypatch):
+    musk = {"id": "44196397", "userName": "elonmusk", "name": "Elon Musk"}
+    def fake_get(url, headers, params, timeout):
+        assert url.endswith("/twitter/tweet/advanced_search")
+        day = params["q"].split("since:")[1].split()[0]
+        tid = {"2026-07-01": "1940000000000000001", "2026-07-02": "1940000000000000002"}[day]
+        return types.SimpleNamespace(status_code=200, raise_for_status=lambda: None, json=lambda: {
+            "has_more": False, "tweets": [{"id": tid, "createdAt": "Wed Jul 01 12:00:00 +0000 2026", "text": "hi", "author": musk}]})
+    sent = []
+    monkeypatch.setattr(collect.requests, "get", fake_get)
+    monkeypatch.setenv("GETXAPI_KEY", "k")
+    monkeypatch.setattr(collect, "sheet_call", lambda action, payload=None:
+        {"ids": ["1940000000000000002"]} if action == "known_ids" else sent.extend(payload["rows"]) or {"ok": True})
+    monkeypatch.setattr(collect, "classify", lambda rows: {})
+    monkeypatch.setattr(collect, "screenshots", lambda rows: {})
+    collect.backfill_days("2026-07-01", "2026-07-02")
+    assert [r["post_id"] for r in sent] == ["1940000000000000001"]  # the known post is skipped

@@ -8,6 +8,12 @@ on:
       backfill_pages:
         description: "Backfill: pages of 100 posts to pull, newest first (max 32). Leave 0 for a normal run."
         default: "0"
+      backfill_since:
+        description: "Date backfill: first day to fill in (YYYY-MM-DD). Leave blank for a normal run."
+        default: ""
+      backfill_until:
+        description: "Date backfill: last day to fill in (YYYY-MM-DD). Blank means today."
+        default: ""
       refresh_existing:
         description: "One-off: add reply/quote context and new screenshots to rows already in the sheet"
         type: boolean
@@ -20,7 +26,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ github.event.inputs.backfill_since != '' && github.event.inputs.backfill_since != null && 340 || 45 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,4 +52,6 @@ jobs:
           WAYBACK_SECRET_KEY: ${{ secrets.WAYBACK_SECRET_KEY }}
           BACKFILL_PAGES: ${{ github.event.inputs.backfill_pages }}
           REFRESH: ${{ github.event.inputs.refresh_existing }}
+          BACKFILL_SINCE: ${{ github.event.inputs.backfill_since }}
+          BACKFILL_UNTIL: ${{ github.event.inputs.backfill_until }}
         run: python collect.py

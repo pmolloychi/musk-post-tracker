@@ -9,7 +9,7 @@ One run:
   6. Send rows + screenshots to the Apps Script endpoint, which appends to the sheet and saves images to Drive.
 
 Env: GETXAPI_KEY (or X_BEARER_TOKEN with SOURCE=x), ANTHROPIC_API_KEY, SHEET_ENDPOINT, SHEET_SECRET,
-     optional WAYBACK_ACCESS_KEY / WAYBACK_SECRET_KEY, BACKFILL_PAGES, MAX_POSTS.
+     optional WAYBACK_ACCESS_KEY / WAYBACK_SECRET_KEY, BACKFILL_PAGES, BACKFILL_SINCE / BACKFILL_UNTIL, REFRESH, MAX_POSTS.
 """
 
 import base64
@@ -18,7 +18,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import anthropic
@@ -446,6 +446,63 @@ def refresh_existing():
         print(f"Updated {res.get('updated')} rows")
 
 
+def search_day(day):
+    """All of his posts on one UTC day via GetXAPI advanced search (timelines stop after ~3,200 posts)."""
+    nxt = (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+    headers = {"Authorization": f"Bearer {os.environ['GETXAPI_KEY']}"}
+    params = {"q": f"from:elonmusk include:nativeretweets since:{day} until:{nxt}",
+              "product": "Latest"}
+    posts, includes = [], {"tweets": [], "users": [], "media": []}
+    for _ in range(100):  # 20 posts a page; no day of his comes close to 2,000
+        r = requests.get(f"{GETXAPI}/twitter/tweet/advanced_search", headers=headers, params=params, timeout=60)
+        if r.status_code == 429:
+            time.sleep(30)
+            continue
+        r.raise_for_status()
+        data = r.json()
+        for t in data.get("tweets", []):
+            if (t.get("author") or {}).get("userName", "").lower() == "elonmusk":
+                _getx_to_v2(t, posts, includes)
+        if not data.get("has_more") or not data.get("next_cursor"):
+            break
+        params["cursor"] = data["next_cursor"]
+    return posts, includes
+
+
+def backfill_days(since, until):
+    """Fill in history day by day, newest first. Safe to rerun: posts already in the sheet are skipped,
+    so a run that hits the time limit just continues where it stopped next time."""
+    if not using_getxapi():
+        raise SystemExit("Date backfill needs GetXAPI's search.")
+    started = time.time()
+    known = set(sheet_call("known_ids").get("ids", []))
+    day = datetime.strptime(until, "%Y-%m-%d")
+    first = datetime.strptime(since, "%Y-%m-%d")
+    total = 0
+    while day >= first:
+        if time.time() - started > 5 * 3600:  # GitHub kills jobs at 6 hours
+            print(f"Stopping for time; rerun the same range to continue from {day:%Y-%m-%d}")
+            break
+        d = day.strftime("%Y-%m-%d")
+        posts, includes = search_day(d)
+        posts = list({p["id"]: p for p in posts if p["id"] not in known}.values())
+        if posts:
+            fetch_parents(posts, includes)
+            posts.sort(key=lambda p: int(p["id"]))
+            rows = [normalize(p, includes) for p in posts]
+            labels = classify(rows)
+            shots = screenshots(rows)
+            payload = build_payload(rows, labels, shots)
+            for i in range(0, len(payload), 10):
+                # No archive submissions here: the hourly runs work through old rows a few at a time
+                sheet_call("append", {"rows": payload[i:i + 10], "wayback": None})
+            known.update(p["id"] for p in posts)
+            total += len(posts)
+        print(f"{d}: {len(posts)} new posts")
+        day -= timedelta(days=1)
+    print(f"Backfill added {total} posts")
+
+
 def main():
     source_key = "GETXAPI_KEY" if using_getxapi() else "X_BEARER_TOKEN"
     missing = [k for k in (source_key, "ANTHROPIC_API_KEY", "SHEET_ENDPOINT", "SHEET_SECRET") if not os.environ.get(k)]
@@ -454,6 +511,9 @@ def main():
         return
     if os.environ.get("REFRESH") == "true":
         return refresh_existing()
+    if os.environ.get("BACKFILL_SINCE"):
+        until = os.environ.get("BACKFILL_UNTIL") or datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d")
+        return backfill_days(os.environ["BACKFILL_SINCE"], until)
     backfill_pages = int(os.environ.get("BACKFILL_PAGES") or 0)
     if wayback_keys():
         try:
