@@ -11,8 +11,9 @@ screenshot to Drive under `Musk Post Tracker screenshots/YYYY-MM/`.
 2. It pages newest-first through GetXAPI's `/twitter/user/tweets_and_replies` until it reaches posts already in the sheet.
 3. Claude (`claude-opus-5-5` at low effort) categorizes and describes the whole batch in one call. It picks
    from the fixed list in `collector/categories.py`.
-4. Each post goes to Wayback Save Page Now. The Archive link column shows one of three things: a snapshot
-   link, `FAILED (...)`, or `PENDING: <search link>`.
+4. Wayback archiving is off (Parker's call, Oct 24, 2026), so the Archive link column says "not submitted".
+   To turn it back on, add `WAYBACK_ACCESS_KEY` and `WAYBACK_SECRET_KEY` to the `env:` block in
+   `.github/workflows/collect.yml`; the code for it is still in place.
 5. Headless Chromium screenshots X's official embed of each post at 2x. If the embed won't load, for example
    because the post was deleted or X blocks the request, the run instead renders a card from the API data. That
    card is labeled "Reconstructed from X API data", and the file's Drive description says so too.
