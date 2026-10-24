@@ -274,6 +274,10 @@ def screenshots(rows):
 # ---------- Main ----------
 
 def main():
+    missing = [k for k in ("X_BEARER_TOKEN", "ANTHROPIC_API_KEY", "SHEET_ENDPOINT", "SHEET_SECRET") if not os.environ.get(k)]
+    if missing:
+        print(f"Not configured yet (missing secrets: {', '.join(missing)}); skipping run.")
+        return
     backfill_pages = int(os.environ.get("BACKFILL_PAGES") or 0)
     latest = None if backfill_pages else sheet_call("latest_id").get("latest_id")
     max_pages = backfill_pages or 5

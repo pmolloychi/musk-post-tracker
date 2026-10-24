@@ -54,6 +54,8 @@ def test_main_end_to_end(monkeypatch):
     monkeypatch.setattr(collect.anthropic, "Anthropic", lambda: types.SimpleNamespace(beta=types.SimpleNamespace(messages=FakeMessages())))
     monkeypatch.delenv("WAYBACK_ACCESS_KEY", raising=False)
     monkeypatch.delenv("BACKFILL_PAGES", raising=False)
+    for k in ("X_BEARER_TOKEN", "ANTHROPIC_API_KEY", "SHEET_ENDPOINT", "SHEET_SECRET"):
+        monkeypatch.setenv(k, "test")
     collect.main()
     assert len(sent) == 4
     assert sent[0]["category"] == "Tesla"
