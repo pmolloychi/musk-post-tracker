@@ -49,7 +49,7 @@ def test_main_end_to_end(monkeypatch):
         def create(self, **kw):
             assert kw["output_config"]["format"]["type"] == "json_schema"
             batch = json.loads(kw["messages"][0]["content"])
-            out = {"posts": [{"post_id": b["post_id"], "category": "Tesla", "secondary_category": "None", "description": "d"} for b in batch]}
+            out = {"posts": [{"post_id": b["post_id"], "category": "Tesla", "secondary_category": "None", "description": "d", "flags": ["Racism"], "flag_reason": "Says \"x\"."} for b in batch]}
             return types.SimpleNamespace(stop_reason="end_turn", content=[types.SimpleNamespace(type="text", text=json.dumps(out))])
     monkeypatch.setattr(collect.anthropic, "Anthropic", lambda: types.SimpleNamespace(beta=types.SimpleNamespace(messages=FakeMessages())))
     monkeypatch.delenv("WAYBACK_ACCESS_KEY", raising=False)
@@ -59,6 +59,7 @@ def test_main_end_to_end(monkeypatch):
     collect.main()
     assert len(sent) == 4
     assert sent[0]["category"] == "Tesla"
+    assert sent[0]["flag"] == "Racism" and sent[0]["screenshot_method"]
     assert sent[1]["link"] == "https://x.com/alice/status/900"
     assert sent[2]["context"].startswith("Replying to @bob: something he replied to")
     assert sent[2]["context_link"] == "https://x.com/bob/status/901"
@@ -121,3 +122,25 @@ def test_backfill_days(monkeypatch):
     monkeypatch.setattr(collect, "screenshots", lambda rows: {})
     collect.backfill_days("2026-07-01", "2026-07-02")
     assert [r["post_id"] for r in sent] == ["1940000000000000001"]  # the known post is skipped
+
+
+def test_relabel_and_check_deleted(monkeypatch):
+    rows = [{"post_id": "1", "type": "Reply", "text": "True", "context": "Replying to @a: x", "date_ct": "2099-01-01 10:00", "status": "Live"},
+            {"post_id": "2", "type": "Retweet", "text": "rt", "context": "", "date_ct": "2099-01-01 10:00", "status": ""},
+            {"post_id": "3", "type": "Standalone", "text": "hi", "context": "", "date_ct": "2099-01-01 10:00", "status": "Deleted (noticed 2099-01-01)"}]
+    calls = []
+    monkeypatch.setattr(collect, "sheet_call", lambda a, p=None: {"rows": rows} if a == "rows" else calls.append((a, p)) or {"updated": 1})
+    monkeypatch.setattr(collect, "classify", lambda rs: {r["post_id"]: {"category": "Other", "secondary_category": "None", "description": "d", "flags": [], "flag_reason": ""} for r in rs})
+    collect.relabel_existing()
+    action, payload = calls[-1]
+    assert action == "relabel" and {r["flag"] for r in payload["rows"]} == {"None"}
+    assert all(set(r) == {"post_id", "category", "description", "flag", "flag_reason"} for r in payload["rows"])
+
+    monkeypatch.setattr(collect, "post_is_live", lambda pid: pid == "3")
+    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
+    calls.clear()
+    collect.check_deleted(full_sweep=True)
+    statuses = {r["post_id"]: r["status"] for r in calls[0][1]["rows"]}
+    assert statuses["1"].startswith("Deleted (noticed ")
+    assert "2" not in statuses
+    assert statuses["3"] == "Live (was missing; noticed 2099-01-01)"

@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import anthropic
 import requests
 
-from categories import CATEGORIES
+from categories import CATEGORIES, FLAGS
 
 MUSK_USER_ID = "44196397"
 CENTRAL = ZoneInfo("America/Chicago")
@@ -280,7 +280,20 @@ For each post, choose the single best category and, only if the post clearly als
 Categories: {", ".join(CATEGORIES)}.
 Write a neutral, factual one- or two-sentence description of what the post says or does, including what it responds to when context is given.
 Do not editorialize, speculate about motive, or judge accuracy. If a post is only an emoji or a link, say so plainly.
-If no context is given, describe the post on its own; don't remark that context is missing."""
+If no context is given, describe the post on its own; don't remark that context is missing.
+The category is the topic only. It never says whether a post is bigoted; that is the flag's job.
+
+Flags are separate from the description. They are suggestions for a human reviewer who checks every
+one, not verdicts, so lean toward flagging when a post plausibly fits: a missed flag is worse than a
+false one. Possible flags: {", ".join(FLAGS)}. Return an empty list when none apply.
+- Judge the post together with the post it replies to, quotes or retweets. A short reply such as
+  "True", "Exactly", "!!", "💯" or "Wow" endorses whatever the parent post says, so if the parent
+  is bigoted, flag the reply.
+- A retweet repeats the original post, so judge the original's text.
+- Watch for coded language and dog whistles (for example "globalists", "great replacement",
+  "remigration", "groomer", "13/50", "invaders"), not only explicit slurs.
+- flag_reason: one neutral sentence that quotes the exact words that triggered the flag, and says
+  whether they come from his post or the post he endorsed. Leave it empty when there are no flags."""
 
 SCHEMA = {
     "type": "object",
@@ -294,8 +307,10 @@ SCHEMA = {
                     "category": {"type": "string", "enum": CATEGORIES},
                     "secondary_category": {"type": "string", "enum": CATEGORIES + ["None"]},
                     "description": {"type": "string"},
+                    "flags": {"type": "array", "items": {"type": "string", "enum": FLAGS}},
+                    "flag_reason": {"type": "string"},
                 },
-                "required": ["post_id", "category", "secondary_category", "description"],
+                "required": ["post_id", "category", "secondary_category", "description", "flags", "flag_reason"],
                 "additionalProperties": False,
             },
         }
@@ -400,9 +415,11 @@ def build_payload(rows, labels, shots):
     for r in rows:
         pid = r["post_id"]
         lab = labels.get(pid)
-        cat = desc = None
+        cat = desc = flag = flag_reason = None
         if lab:
             cat, desc = lab["category"], lab["description"]
+            flag = "; ".join(lab.get("flags") or []) or "None"
+            flag_reason = lab.get("flag_reason") or ""
             if lab.get("secondary_category") not in (None, "None", cat):
                 cat += f"; {lab['secondary_category']}"
         png, method = shots.get(pid, (None, None))
@@ -416,6 +433,8 @@ def build_payload(rows, labels, shots):
             "context_link": r.get("context_link") or "",
             "category": cat,
             "description": desc,
+            "flag": flag,
+            "flag_reason": flag_reason,
             "screenshot_name": f"{r['date_ct'][:10]}-elonmusk-{pid}.png",
             "screenshot_b64": base64.b64encode(png).decode() if png else None,
             "screenshot_method": method,
@@ -451,6 +470,68 @@ def refresh_existing():
     for i in range(0, len(payload), 10):
         res = sheet_call("update", {"rows": payload[i:i + 10]})
         print(f"Updated {res.get('updated')} rows")
+
+
+def relabel_existing():
+    """Re-run topics, flags and descriptions on every row from the text already in the sheet.
+    Touches only Category, Flag, Flag reason and Claude description; never reviewer columns."""
+    existing = [e for e in sheet_call("rows")["rows"] if e.get("text")]
+    rows = [{"post_id": e["post_id"], "type": e["type"], "text": e["text"], "context": e.get("context") or None}
+            for e in existing]
+    print(f"Relabeling {len(rows)} rows")
+    labels = classify(rows)
+    payload = []
+    for pid, lab in labels.items():
+        flag = "; ".join(lab.get("flags") or []) or "None"
+        cat = lab["category"]
+        if lab.get("secondary_category") not in (None, "None", cat):
+            cat += f"; {lab['secondary_category']}"
+        payload.append({"post_id": pid, "category": cat, "description": lab["description"],
+                        "flag": flag, "flag_reason": lab.get("flag_reason") or ""})
+    for i in range(0, len(payload), 50):
+        res = sheet_call("relabel", {"rows": payload[i:i + 50]})
+        print(f"Relabeled {res.get('updated')} rows")
+
+
+def post_is_live(post_id):
+    """True/False from X's free oEmbed endpoint, or None if X didn't give a clear answer."""
+    url = f"https://publish.twitter.com/oembed?url=https://twitter.com/x/status/{post_id}&omit_script=1"
+    for attempt in range(2):
+        try:
+            r = requests.get(url, timeout=20)
+        except Exception:
+            return None
+        if r.status_code == 200:
+            return True
+        if r.status_code != 404:
+            return None
+        time.sleep(2)  # ask twice before calling a post gone
+    return False
+
+
+def check_deleted(full_sweep):
+    """Mark posts Deleted when X no longer serves them. Daily: the last 14 days. Weekly: everything."""
+    today = datetime.now(CENTRAL).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(CENTRAL) - timedelta(days=14)).strftime("%Y-%m-%d")
+    changes, checked = [], 0
+    for e in sheet_call("rows")["rows"]:
+        if e["type"] == "Retweet":
+            continue  # a retweet's row points at someone else's post; its liveness says little about him
+        if not full_sweep and e["date_ct"][:10] < cutoff:
+            continue
+        live = post_is_live(e["post_id"])
+        checked += 1
+        time.sleep(0.3)
+        status = e.get("status") or ""
+        if live is False and not status.startswith("Deleted"):
+            changes.append({"post_id": e["post_id"], "status": f"Deleted (noticed {today})"})
+        elif live is True and status.startswith("Deleted"):
+            changes.append({"post_id": e["post_id"], "status": f"Live (was missing; {status[len('Deleted '):].strip('()')})"})
+        elif live is True and not status:
+            changes.append({"post_id": e["post_id"], "status": "Live"})
+    for i in range(0, len(changes), 200):
+        sheet_call("set_status", {"rows": changes[i:i + 200]})
+    print(f"Checked {checked} posts; {sum(c['status'].startswith('Deleted') for c in changes)} newly missing")
 
 
 def search_day(day):
@@ -518,6 +599,10 @@ def main():
         return
     if os.environ.get("REFRESH") == "true":
         return refresh_existing()
+    if os.environ.get("RELABEL") == "true":
+        return relabel_existing()
+    if os.environ.get("CHECK_DELETED") == "true":
+        return check_deleted(full_sweep=datetime.now(CENTRAL).weekday() == 6)
     if os.environ.get("BACKFILL_SINCE"):
         until = os.environ.get("BACKFILL_UNTIL") or datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d")
         return backfill_days(os.environ["BACKFILL_SINCE"], until)

@@ -3,6 +3,7 @@ name: Collect Musk posts
 on:
   schedule:
     - cron: "7 * * * *"   # hourly; GitHub may start scheduled runs a few minutes late
+    - cron: "37 10 * * *" # daily deleted-post check (all posts on Sundays)
   workflow_dispatch:
     inputs:
       backfill_pages:
@@ -14,6 +15,14 @@ on:
       backfill_until:
         description: "Date backfill: last day to fill in (YYYY-MM-DD). Blank means today."
         default: ""
+      relabel_existing:
+        description: "Re-run topics, flags and descriptions on all rows (never touches reviewer columns)"
+        type: boolean
+        default: false
+      check_deleted:
+        description: "Check recent posts for deletion now"
+        type: boolean
+        default: false
       refresh_existing:
         description: "One-off: add reply/quote context and new screenshots to rows already in the sheet"
         type: boolean
@@ -52,6 +61,8 @@ jobs:
           WAYBACK_SECRET_KEY: ${{ secrets.WAYBACK_SECRET_KEY }}
           BACKFILL_PAGES: ${{ github.event.inputs.backfill_pages }}
           REFRESH: ${{ github.event.inputs.refresh_existing }}
+          RELABEL: ${{ github.event.inputs.relabel_existing }}
+          CHECK_DELETED: ${{ github.event.schedule == '37 10 * * *' || github.event.inputs.check_deleted == 'true' }}
           BACKFILL_SINCE: ${{ github.event.inputs.backfill_since }}
           BACKFILL_UNTIL: ${{ github.event.inputs.backfill_until }}
         run: python collect.py

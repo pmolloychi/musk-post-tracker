@@ -49,8 +49,42 @@ and tick `refresh_existing`. That run re-describes those rows and replaces their
 
 ## Backfill
 
-Run the workflow manually with `backfill_pages` set to a value from 1 to 32. Each page holds 100 posts, newest first. X only returns
-a user's most recent ~3,200 posts, so a backfill can't reach further back than that. Posts already in the sheet are skipped.
+Run the workflow manually with `backfill_since` (and optionally `backfill_until`) as YYYY-MM-DD dates. It searches
+GetXAPI one day at a time, newest first, skips posts already in the sheet, and stops after 5 hours. If it gets cut off,
+run it again with the same dates and it picks up where it left off. New rows land at the bottom, so sort by Date afterwards.
+`backfill_pages` (1 to 32) is the older timeline-based option, limited to his most recent ~3,200 posts.
+
+## Flags and the review app
+
+**Category** is a topic only. It never says whether a post is bigoted.
+
+**Flag** and **Flag reason** are Claude's suggestions for a human reviewer, written in the same call as the topic and
+description. Flag is zero or more of the labels in `collector/categories.py` (FLAGS), or "None". The prompt leans toward
+flagging, reads short replies like "True" together with the post they answer, and looks for coded language.
+Treat flags as a review queue, not findings.
+
+**Finding, Harm type, Conduct, Rationale, Reviewed at** belong to the reviewer. Only the Apps Script `review` action
+writes them. Collection, `refresh_existing` and `relabel_existing` never touch them. The review app posts:
+
+```json
+{"secret": "...", "action": "review", "post_id": "1849...", "finding": "Approved",
+ "harm_type": "...", "conduct": "Endorsed another post", "rationale": "...", "reviewed_at": "2026-10-24 15:02"}
+```
+
+Finding must be Approved, Rejected or empty. Conduct must be Original statement, Endorsed another post,
+Quoted with comment, Retweeted or empty. Fields left out are left unchanged. The response is `{"ok": true, "row": N, "written": [...]}`.
+The app can read rows with `{"action": "rows"}`, or read the sheet directly.
+
+**Screenshot source** says "X embed" (X's own rendering, fit for public evidence) or "Reconstructed" (a card built from API
+data when the embed wouldn't load; don't publish these as evidence).
+
+**Status** is set by a daily check at 10:37 UTC that asks X's free oEmbed endpoint whether each post from the last 14 days
+still exists; on Sundays it checks every row. Missing posts get "Deleted (noticed YYYY-MM-DD)". X answers the same way for
+deleted posts and posts withheld or hidden from logged-out viewers, so "Deleted" means "no longer publicly visible".
+Retweets are skipped. Run it any time with the `check_deleted` box.
+
+To re-run topics and flags on every existing row (after changing the category list or the prompt), tick `relabel_existing`.
+It uses the text already in the sheet and costs one Claude call per 40 rows.
 
 ## Costs and limits (checked Oct 24, 2026)
 
@@ -73,5 +107,5 @@ retweets come through `tweets_and_replies`, so check the first runs against his 
 
 ## Not covered yet
 
-- Edits and deletions after a post is logged, which would need a re-check job.
+- Edits after a post is logged.
 - Community Notes and live engagement counts, which the embed doesn't show reliably.
