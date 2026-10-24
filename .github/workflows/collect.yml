@@ -8,6 +8,10 @@ on:
       backfill_pages:
         description: "Backfill: pages of 100 posts to pull, newest first (max 32). Leave 0 for a normal run."
         default: "0"
+      refresh_existing:
+        description: "One-off: add reply/quote context and new screenshots to rows already in the sheet"
+        type: boolean
+        default: false
 
 concurrency:
   group: collect
@@ -41,4 +45,5 @@ jobs:
           WAYBACK_ACCESS_KEY: ${{ secrets.WAYBACK_ACCESS_KEY }}
           WAYBACK_SECRET_KEY: ${{ secrets.WAYBACK_SECRET_KEY }}
           BACKFILL_PAGES: ${{ github.event.inputs.backfill_pages }}
+          REFRESH: ${{ github.event.inputs.refresh_existing }}
         run: python collect.py

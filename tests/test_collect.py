@@ -60,6 +60,8 @@ def test_main_end_to_end(monkeypatch):
     assert len(sent) == 4
     assert sent[0]["category"] == "Tesla"
     assert sent[1]["link"] == "https://x.com/alice/status/900"
+    assert sent[2]["context"].startswith("Replying to @bob: something he replied to")
+    assert sent[2]["context_link"] == "https://x.com/bob/status/901"
     assert sent[0]["screenshot_name"] == "2026-10-17-elonmusk-1849000000000000003.png"
 
 def test_getxapi_conversion(monkeypatch):
@@ -78,9 +80,14 @@ def test_getxapi_conversion(monkeypatch):
     old_page = {"has_more": True, "next_cursor": "c3", "tweets": [
         {"id": "1849000000000000001", "createdAt": "Sat Oct 18 01:00:00 +0000 2026", "text": "old", "author": musk}]}
     calls = []
+    parent = {"id": "901", "createdAt": "Fri Oct 17 05:00:00 +0000 2026", "text": "what alice said", "author": alice}
     def fake_get(url, headers, params, timeout):
+        assert headers["Authorization"] == "Bearer k"
+        if url.endswith("/twitter/tweet/detail"):
+            assert params == {"id": "901"}
+            return types.SimpleNamespace(status_code=200, json=lambda: {"status": "success", "data": parent})
         calls.append(dict(params))
-        assert url.endswith("/twitter/user/tweets_and_replies") and headers["Authorization"] == "Bearer k"
+        assert url.endswith("/twitter/user/tweets_and_replies")
         return types.SimpleNamespace(status_code=200, raise_for_status=lambda: None,
                                      json=lambda: page if "cursor" not in params else old_page)
     monkeypatch.setattr(collect.requests, "get", fake_get)
@@ -90,6 +97,9 @@ def test_getxapi_conversion(monkeypatch):
     rows = [collect.normalize(p, inc) for p in sorted(posts, key=lambda p: int(p["id"]))]
     assert [r["type"] for r in rows] == ["Retweet", "Reply", "Quote"]
     assert rows[0]["text"] == "RT @alice: hi there in full" and rows[0]["screenshot_id"] == "900"
-    assert rows[1]["context"] == "Replying to @alice (parent text not fetched)"
+    assert rows[1]["context"] == "Replying to @alice: what alice said"
+    assert rows[1]["context_link"] == "https://x.com/alice/status/901"
+    assert rows[2]["context_link"] == "https://x.com/alice/status/902"
+    assert rows[0]["context"] == "Retweet of @alice"
     assert rows[2]["context"] == "Quoting @alice: quoted text"
     assert rows[0]["date_ct"] == "2026-10-18 00:00"

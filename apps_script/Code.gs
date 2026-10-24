@@ -2,13 +2,15 @@
  * Musk Post Tracker: sheet + Drive endpoint for the GitHub Action.
  * Paste into the sheet's Extensions > Apps Script, set the SECRET script property,
  * then Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone).
+ * After pasting a new version: Deploy > Manage deployments > edit > Version: New version > Deploy.
  */
 
 const SHEET_NAME = 'Posts';
 const FOLDER_NAME = 'Musk Post Tracker screenshots';
-const ID_COL = 9; // column I, Post ID
-const LINK_COL = 3; // column C
-const ARCHIVE_COL = 7; // column G
+const HEADERS = ['Date (CT)', 'Type', 'Link', 'Text', 'Responding to', 'Their post link', 'Category',
+                 'Claude description', 'Archive link', 'Screenshot', 'Post ID'];
+const COL = {};
+HEADERS.forEach((h, i) => { COL[h] = i + 1; });
 const MAX_SUBMITS_PER_RUN = 15; // Save Page Now allows a handful of captures per minute per account
 
 function doPost(e) {
@@ -20,9 +22,12 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
+    ensureLayout_();
     if (body.action === 'latest_id') return json_({ ok: true, latest_id: latestId_() });
     if (body.action === 'known_ids') return json_({ ok: true, ids: knownIds_() });
+    if (body.action === 'rows') return json_({ ok: true, rows: rows_() });
     if (body.action === 'append') return json_({ ok: true, appended: append_(body.rows, body.wayback) });
+    if (body.action === 'update') return json_({ ok: true, updated: update_(body.rows) });
     if (body.action === 'check_archives') return json_(Object.assign({ ok: true }, checkArchives_(body.wayback)));
     return json_({ ok: false, error: 'unknown action' });
   } finally {
@@ -34,11 +39,24 @@ function sheet_() {
   return SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
 }
 
-function knownIds_() {
+// One-time migration: the first version had no context columns. Insert them after Text.
+function ensureLayout_() {
+  const sh = sheet_();
+  if (sh.getRange(1, COL['Responding to']).getValue() === 'Responding to') return;
+  sh.insertColumnsAfter(COL['Text'], 2);
+  sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
+  sh.setColumnWidth(COL['Responding to'], 360);
+}
+
+function dataRange_(col, width) {
   const sh = sheet_();
   const n = sh.getLastRow() - 1;
-  if (n < 1) return [];
-  return sh.getRange(2, ID_COL, n, 1).getDisplayValues().map(r => String(r[0]).trim()).filter(Boolean);
+  return n < 1 ? null : sh.getRange(2, col, n, width || 1);
+}
+
+function knownIds_() {
+  const r = dataRange_(COL['Post ID']);
+  return r ? r.getDisplayValues().map(x => String(x[0]).trim()).filter(Boolean) : [];
 }
 
 // Post IDs are 19 digits, past what a spreadsheet number can hold exactly, so compare them as strings.
@@ -50,9 +68,18 @@ function latestId_() {
   return best;
 }
 
+function rows_() {
+  const r = dataRange_(1, HEADERS.length);
+  if (!r) return [];
+  return r.getDisplayValues().map(v => ({
+    date_ct: v[COL['Date (CT)'] - 1], type: v[COL['Type'] - 1], link: v[COL['Link'] - 1],
+    post_id: String(v[COL['Post ID'] - 1]).trim(),
+  })).filter(x => x.post_id);
+}
+
 function folderFor_(dateCt) {
   const props = PropertiesService.getScriptProperties();
-  let rootId = props.getProperty('FOLDER_ID');
+  const rootId = props.getProperty('FOLDER_ID');
   let root;
   if (rootId) {
     root = DriveApp.getFolderById(rootId);
@@ -60,9 +87,17 @@ function folderFor_(dateCt) {
     root = DriveApp.createFolder(FOLDER_NAME);
     props.setProperty('FOLDER_ID', root.getId());
   }
-  const month = dateCt.slice(0, 7); // YYYY-MM subfolders keep each folder browsable
+  const month = String(dateCt).slice(0, 7); // YYYY-MM subfolders keep each folder browsable
   const it = root.getFoldersByName(month);
   return it.hasNext() ? it.next() : root.createFolder(month);
+}
+
+function saveShot_(r) {
+  if (!r.screenshot_b64) return '';
+  const blob = Utilities.newBlob(Utilities.base64Decode(r.screenshot_b64), 'image/png', r.screenshot_name);
+  const file = folderFor_(r.date_ct).createFile(blob);
+  if (r.screenshot_method && r.screenshot_method !== 'X embed') file.setDescription(r.screenshot_method);
+  return file.getUrl();
 }
 
 // Keep tweet text from being read as a formula or number.
@@ -72,32 +107,60 @@ function safe_(s) {
 }
 
 function append_(rows, wayback) {
-  let submits = 0;
   const sh = sheet_();
   const known = new Set(knownIds_());
   const out = [];
+  let submits = 0;
   for (const r of rows) {
     if (known.has(r.post_id)) continue;
-    let shot = '';
-    if (r.screenshot_b64) {
-      const blob = Utilities.newBlob(Utilities.base64Decode(r.screenshot_b64), 'image/png', r.screenshot_name);
-      const file = folderFor_(r.date_ct).createFile(blob);
-      if (r.screenshot_method && r.screenshot_method !== 'X embed') file.setDescription(r.screenshot_method);
-      shot = file.getUrl();
-    }
-    out.push([
-      r.date_ct, r.type, r.link, safe_(r.text), r.category, safe_(r.description),
-      (wayback && submits++ < MAX_SUBMITS_PER_RUN) ? waybackSubmit_(r.link, wayback) : 'not submitted',
-      shot, "'" + r.post_id,
-    ]);
+    const row = new Array(HEADERS.length).fill('');
+    row[COL['Date (CT)'] - 1] = r.date_ct;
+    row[COL['Type'] - 1] = r.type;
+    row[COL['Link'] - 1] = r.link;
+    row[COL['Text'] - 1] = safe_(r.text);
+    row[COL['Responding to'] - 1] = safe_(r.context);
+    row[COL['Their post link'] - 1] = r.context_link || '';
+    row[COL['Category'] - 1] = r.category || 'UNCATEGORIZED';
+    row[COL['Claude description'] - 1] = safe_(r.description);
+    row[COL['Archive link'] - 1] =
+      (wayback && submits++ < MAX_SUBMITS_PER_RUN) ? waybackSubmit_(r.link, wayback) : 'not submitted';
+    row[COL['Screenshot'] - 1] = saveShot_(r);
+    row[COL['Post ID'] - 1] = "'" + r.post_id;
+    out.push(row);
     known.add(r.post_id);
   }
   if (out.length) {
     const start = sh.getLastRow() + 1;
-    sh.getRange(start, 1, out.length, out[0].length).setValues(out);
-    sh.getRange(start, 4, out.length, 1).setWrap(true);
+    sh.getRange(start, 1, out.length, HEADERS.length).setValues(out);
+    sh.getRange(start, COL['Text'], out.length, 2).setWrap(true);
   }
   return out.length;
+}
+
+// Refresh rows already in the sheet. Only fields that are present get overwritten.
+function update_(rows) {
+  const sh = sheet_();
+  const rowOf = {};
+  knownIds_().forEach((id, i) => { rowOf[id] = i + 2; });
+  let updated = 0;
+  for (const r of rows) {
+    const rowNum = rowOf[r.post_id];
+    if (!rowNum) continue;
+    const set = (h, v) => sh.getRange(rowNum, COL[h]).setValue(v);
+    set('Responding to', safe_(r.context));
+    set('Their post link', r.context_link || '');
+    if (r.category) set('Category', r.category);
+    if (r.description) set('Claude description', safe_(r.description));
+    if (r.screenshot_b64) {
+      const old = String(sh.getRange(rowNum, COL['Screenshot']).getValue());
+      const m = old.match(/\/d\/([^/]+)/);
+      set('Screenshot', saveShot_(r));
+      if (m) { try { DriveApp.getFileById(m[1]).setTrashed(true); } catch (err) { /* already gone */ } }
+    }
+    sh.getRange(rowNum, COL['Responding to']).setWrap(true);
+    updated++;
+  }
+  return updated;
 }
 
 // ---------- Wayback Machine ----------
@@ -121,13 +184,12 @@ function waybackSubmit_(url, keys) {
 
 // Each hourly run: turn finished jobs into snapshot links, and submit older rows that never got archived.
 function checkArchives_(keys) {
-  const sh = sheet_();
-  const n = sh.getLastRow() - 1;
-  if (n < 1 || !keys) return { resolved: 0, pending: 0 };
-  const cells = sh.getRange(2, ARCHIVE_COL, n, 1).getValues();
-  const links = sh.getRange(2, LINK_COL, n, 1).getValues();
+  const cellsRange = dataRange_(COL['Archive link']);
+  if (!cellsRange || !keys) return { resolved: 0, pending: 0 };
+  const cells = cellsRange.getValues();
+  const links = dataRange_(COL['Link']).getValues();
   let resolved = 0, pending = 0, submits = 0;
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < cells.length; i++) {
     const v = String(cells[i][0]);
     if (v.indexOf('PENDING job:') === 0) {
       const job = v.slice('PENDING job:'.length);
@@ -148,7 +210,7 @@ function checkArchives_(keys) {
       cells[i][0] = waybackSubmit_(String(links[i][0]), keys); submits++; pending++;
     }
   }
-  sh.getRange(2, ARCHIVE_COL, n, 1).setValues(cells);
+  cellsRange.setValues(cells);
   return { resolved: resolved, pending: pending };
 }
 

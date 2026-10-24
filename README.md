@@ -37,6 +37,16 @@ reads `RT @user: ...`.
    `SHEET_ENDPOINT` (the web app URL), `SHEET_SECRET`, `WAYBACK_ACCESS_KEY`, `WAYBACK_SECRET_KEY`.
 7. Go to Actions > Collect Musk posts > Run workflow, and leave the input at 0 for the first run.
 
+## Context for replies, quotes and retweets
+
+The **Responding to** column shows who he's replying to, quoting or retweeting, and the text of that post.
+**Their post link** links to it. For replies, the collector looks up each parent post on GetXAPI
+($0.001 per reply). Screenshots use X's default embed, which shows the parent post above a reply.
+Quotes already show the quoted post inside the card.
+
+To add this to rows logged before the feature existed, go to Actions > Collect Musk posts > Run workflow
+and tick `refresh_existing`. That run re-describes those rows and replaces their screenshots.
+
 ## Backfill
 
 Run the workflow manually with `backfill_pages` set to a value from 1 to 32. Each page holds 100 posts, newest first. X only returns

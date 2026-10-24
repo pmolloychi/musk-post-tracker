@@ -163,9 +163,40 @@ def fetch_posts_getxapi(since_id, max_pages):
     return posts, includes
 
 
+def getx_detail(post_id):
+    """One post from GetXAPI ($0.001 per call), or None if it's deleted or unavailable."""
+    try:
+        r = requests.get(f"{GETXAPI}/twitter/tweet/detail", params={"id": post_id},
+                         headers={"Authorization": f"Bearer {os.environ['GETXAPI_KEY']}"}, timeout=60)
+        if r.status_code != 200:
+            return None
+        return r.json().get("data")
+    except Exception as e:
+        print(f"GetXAPI detail failed for {post_id}: {e}")
+        return None
+
+
+def fetch_parents(posts, includes):
+    """GetXAPI timelines don't include the post being replied to, so look each one up."""
+    have = {t["id"] for t in includes["tweets"]}
+    for p in posts:
+        for ref in p.get("referenced_tweets", []):
+            if ref["type"] == "replied_to" and ref["id"] not in have:
+                data = getx_detail(ref["id"])
+                if data:
+                    _getx_to_v2(data, None, includes)
+                have.add(ref["id"])
+
+
+def using_getxapi():
+    return os.environ.get("SOURCE", "getxapi") == "getxapi"
+
+
 def get_posts(since_id, max_pages):
-    if os.environ.get("SOURCE", "getxapi") == "getxapi":
-        return fetch_posts_getxapi(since_id, max_pages * 5)  # GetXAPI pages hold ~20 posts, not 100
+    if using_getxapi():
+        posts, includes = fetch_posts_getxapi(since_id, max_pages * 5)  # GetXAPI pages hold ~20 posts, not 100
+        fetch_parents(posts, includes)
+        return posts, includes
     return fetch_posts(since_id, max_pages)
 
 
@@ -184,7 +215,9 @@ def normalize(post, includes):
         if not t:
             return None
         u = users.get(t.get("author_id"), {})
-        return {"id": ref_id, "username": u.get("username", "i"), "text": full_text(t)}
+        username = u.get("username", "i")
+        return {"id": ref_id, "username": username, "text": full_text(t),
+                "link": f"https://x.com/{username}/status/{ref_id}"}
 
     created = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
     row = {
@@ -193,7 +226,8 @@ def normalize(post, includes):
         "date_ct": created.astimezone(CENTRAL).strftime("%Y-%m-%d %H:%M"),
         "link": f"https://x.com/elonmusk/status/{post['id']}",
         "text": full_text(post),
-        "context": None,  # text of the post he replied to, quoted or retweeted
+        "context": None,  # who and what he replied to, quoted or retweeted
+        "context_link": None,
         "screenshot_id": post["id"],
     }
     if "retweeted" in refs:
@@ -201,23 +235,30 @@ def normalize(post, includes):
         orig = ref_info(refs["retweeted"])
         if orig:
             row["text"] = f"RT @{orig['username']}: {orig['text']}"
-            row["context"] = f"Original post by @{orig['username']}"
+            row["context"] = f"Retweet of @{orig['username']}"
+            row["context_link"] = orig["link"]
             row["screenshot_id"] = orig["id"]  # retweets have no embed of their own
-            row["original_link"] = f"https://x.com/{orig['username']}/status/{orig['id']}"
+            row["original_link"] = orig["link"]
     elif "quoted" in refs:
         row["type"] = "Quote"
         q = ref_info(refs["quoted"])
         if q:
             row["context"] = f"Quoting @{q['username']}: {q['text']}"
+            row["context_link"] = q["link"]
         if "replied_to" in refs:
-            row["context"] = (row["context"] or "") + " (also a reply)"
+            p = ref_info(refs["replied_to"])
+            row["context"] = (row["context"] or "") + (
+                f"\n\nAlso replying to @{p['username']}: {p['text']}" if p else "\n\n(Also a reply)")
     elif "replied_to" in refs:
         row["type"] = "Reply"
         p = ref_info(refs["replied_to"])
         if p:
             row["context"] = f"Replying to @{p['username']}: {p['text']}"
-        elif post.get("_reply_to_username"):
-            row["context"] = f"Replying to @{post['_reply_to_username']} (parent text not fetched)"
+            row["context_link"] = p["link"]
+        else:
+            who = f"@{post['_reply_to_username']}" if post.get("_reply_to_username") else "a post"
+            row["context"] = f"Replying to {who} (that post is deleted or unavailable)"
+            row["context_link"] = f"https://x.com/i/status/{refs['replied_to']}"
     elif post.get("_rt_text_only"):
         row["type"] = "Retweet"
     else:
@@ -231,7 +272,8 @@ SYSTEM = f"""You categorize posts by Elon Musk on X for a journalist's archive.
 For each post, choose the single best category and, only if the post clearly also fits another, a secondary one; otherwise set secondary_category to "None".
 Categories: {", ".join(CATEGORIES)}.
 Write a neutral, factual one- or two-sentence description of what the post says or does, including what it responds to when context is given.
-Do not editorialize, speculate about motive, or judge accuracy. If a post is only an emoji or a link, say so plainly."""
+Do not editorialize, speculate about motive, or judge accuracy. If a post is only an emoji or a link, say so plainly.
+If no context is given, describe the post on its own; don't remark that context is missing."""
 
 SCHEMA = {
     "type": "object",
@@ -261,7 +303,7 @@ def classify(rows, chunk=40):
     out = {}
     for i in range(0, len(rows), chunk):
         batch = [
-            {"post_id": r["post_id"], "type": r["type"], "text": r["text"], "context": r["context"]}
+            {"post_id": r["post_id"], "type": r["type"], "text": r["text"], "context": r.get("context")}
             for r in rows[i:i + chunk]
         ]
         resp = client.beta.messages.create(
@@ -317,13 +359,20 @@ def screenshots(rows):
             page = ctx.new_page()  # fresh page per post so a failed load can't break the next one
             try:
                 page.goto(
-                    f"https://platform.twitter.com/embed/Tweet.html?id={r['screenshot_id']}&theme=light&dnt=true&conversation=none",
+                    # Default conversation mode: for a reply, X's embed shows the parent post above it
+                    f"https://platform.twitter.com/embed/Tweet.html?id={r['screenshot_id']}&theme=light&dnt=true",
                     wait_until="networkidle", timeout=30000,
                 )
-                el = page.locator("article").first
-                el.wait_for(state="visible", timeout=15000)
-                page.wait_for_timeout(1200)  # let avatar and media finish painting
-                shots[pid] = (el.screenshot(type="png"), "X embed")
+                page.locator("article").first.wait_for(state="visible", timeout=15000)
+                page.wait_for_timeout(1500)  # let avatars and media finish painting
+                # Crop to everything the embed drew (parent + reply), not just the first card
+                box = page.evaluate("""() => {
+                    const els = [...document.querySelectorAll('article')].map(e => e.getBoundingClientRect());
+                    const top = Math.min(...els.map(b => b.top)), left = Math.min(...els.map(b => b.left));
+                    const bottom = Math.max(...els.map(b => b.bottom)), right = Math.max(...els.map(b => b.right));
+                    return {x: left + scrollX, y: top + scrollY, width: right - left, height: bottom - top};
+                }""")
+                shots[pid] = (page.screenshot(type="png", clip=box, full_page=True), "X embed")
             except Exception as e:
                 print(f"Embed failed for {pid} ({str(e).splitlines()[0]}); rendering fallback card")
                 page.close()
@@ -339,12 +388,72 @@ def screenshots(rows):
 
 # ---------- Main ----------
 
+def build_payload(rows, labels, shots):
+    payload = []
+    for r in rows:
+        pid = r["post_id"]
+        lab = labels.get(pid)
+        cat = desc = None
+        if lab:
+            cat, desc = lab["category"], lab["description"]
+            if lab.get("secondary_category") not in (None, "None", cat):
+                cat += f"; {lab['secondary_category']}"
+        png, method = shots.get(pid, (None, None))
+        payload.append({
+            "post_id": pid,
+            "date_ct": r["date_ct"],
+            "type": r["type"],
+            "link": r.get("original_link", r["link"]),
+            "text": r.get("text"),
+            "context": r.get("context") or "",
+            "context_link": r.get("context_link") or "",
+            "category": cat,
+            "description": desc,
+            "screenshot_name": f"{r['date_ct'][:10]}-elonmusk-{pid}.png",
+            "screenshot_b64": base64.b64encode(png).decode() if png else None,
+            "screenshot_method": method,
+        })
+    return payload
+
+
+def refresh_existing():
+    """One-off: add reply/quote context, re-describe, and re-screenshot rows already in the sheet."""
+    if not using_getxapi():
+        raise SystemExit("Refresh needs GetXAPI (it looks posts up one at a time).")
+    existing = sheet_call("rows")["rows"]
+    posts, includes, rows = [], {"tweets": [], "users": [], "media": []}, []
+    for e in existing:
+        if e["type"] == "Retweet":
+            # The sheet already holds the original's text and link; just fill the context columns.
+            orig_user, orig_id = e["link"].rstrip("/").split("/")[-3], e["link"].rstrip("/").split("/")[-1]
+            rows.append({"post_id": e["post_id"], "date_ct": e["date_ct"], "type": "Retweet",
+                         "link": e["link"], "context": f"Retweet of @{orig_user}", "context_link": e["link"],
+                         "screenshot_id": orig_id})
+            continue
+        data = getx_detail(e["post_id"])
+        if data:
+            _getx_to_v2(data, posts, includes)
+        else:
+            print(f"Post {e['post_id']} unavailable now; leaving its row as is")
+    fetch_parents(posts, includes)
+    rows += [normalize(p, includes) for p in posts]
+    print(f"Refreshing {len(rows)} rows")
+    labels = classify([r for r in rows if r.get("text")])
+    shots = screenshots(rows)
+    payload = build_payload(rows, labels, shots)
+    for i in range(0, len(payload), 10):
+        res = sheet_call("update", {"rows": payload[i:i + 10]})
+        print(f"Updated {res.get('updated')} rows")
+
+
 def main():
-    source_key = "GETXAPI_KEY" if os.environ.get("SOURCE", "getxapi") == "getxapi" else "X_BEARER_TOKEN"
+    source_key = "GETXAPI_KEY" if using_getxapi() else "X_BEARER_TOKEN"
     missing = [k for k in (source_key, "ANTHROPIC_API_KEY", "SHEET_ENDPOINT", "SHEET_SECRET") if not os.environ.get(k)]
     if missing:
         print(f"Not configured yet (missing secrets: {', '.join(missing)}); skipping run.")
         return
+    if os.environ.get("REFRESH") == "true":
+        return refresh_existing()
     backfill_pages = int(os.environ.get("BACKFILL_PAGES") or 0)
     if wayback_keys():
         try:
@@ -368,29 +477,9 @@ def main():
 
     labels = classify(rows)
     shots = screenshots(rows)
-
-    for i in range(0, len(rows), 10):
-        payload = []
-        for r in rows[i:i + 10]:
-            pid = r["post_id"]
-            lab = labels.get(pid, {})
-            cat = lab.get("category", "UNCATEGORIZED")
-            if lab.get("secondary_category") not in (None, "None", cat):
-                cat += f"; {lab['secondary_category']}"
-            png, method = shots.get(pid, (None, None))
-            payload.append({
-                "post_id": pid,
-                "date_ct": r["date_ct"],
-                "type": r["type"],
-                "link": r.get("original_link", r["link"]),
-                "text": r["text"],
-                "category": cat,
-                "description": lab.get("description", ""),
-                "screenshot_name": f"{r['date_ct'][:10]}-elonmusk-{pid}.png",
-                "screenshot_b64": base64.b64encode(png).decode() if png else None,
-                "screenshot_method": method,
-            })
-        res = sheet_call("append", {"rows": payload, "wayback": wayback_keys()})
+    payload = build_payload(rows, labels, shots)
+    for i in range(0, len(payload), 10):
+        res = sheet_call("append", {"rows": payload[i:i + 10], "wayback": wayback_keys()})
         print(f"Appended {res.get('appended')} rows")
 
 
