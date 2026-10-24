@@ -283,43 +283,12 @@ def classify(rows, chunk=40):
 
 
 # ---------- Wayback Machine (best effort) ----------
+# archive.org refuses connections from GitHub's runners, so the Apps Script endpoint (on Google's
+# servers) submits each post to Save Page Now and fills in the snapshot link on later runs.
 
-def wayback_submit(url):
+def wayback_keys():
     ak, sk = os.environ.get("WAYBACK_ACCESS_KEY"), os.environ.get("WAYBACK_SECRET_KEY")
-    if not (ak and sk):
-        return None
-    try:
-        r = requests.post(
-            "https://web.archive.org/save",
-            headers={"Accept": "application/json", "Authorization": f"LOW {ak}:{sk}"},
-            data={"url": url, "capture_outlinks": "0", "skip_first_archive": "1"},
-            timeout=60,
-        )
-        return r.json().get("job_id")
-    except Exception as e:  # archive failures must never stop the run
-        print(f"Wayback submit failed for {url}: {e}")
-        return None
-
-
-def wayback_results(jobs, max_wait=240):
-    """jobs: {post_id: (url, job_id)} -> {post_id: archive link or note}"""
-    results, pending, deadline = {}, dict(jobs), time.time() + max_wait
-    while pending and time.time() < deadline:
-        time.sleep(10)
-        for pid, (url, job) in list(pending.items()):
-            try:
-                s = requests.get(f"https://web.archive.org/save/status/{job}", timeout=30).json()
-            except Exception:
-                continue
-            if s.get("status") == "success":
-                results[pid] = f"https://web.archive.org/web/{s['timestamp']}/{s['original_url']}"
-                pending.pop(pid)
-            elif s.get("status") == "error":
-                results[pid] = f"FAILED ({s.get('status_ext', 'error')})"
-                pending.pop(pid)
-    for pid, (url, _) in pending.items():
-        results[pid] = f"PENDING: https://web.archive.org/web/*/{url}"
-    return results
+    return {"access": ak, "secret": sk} if ak and sk else None
 
 
 # ---------- Screenshots ----------
@@ -340,7 +309,9 @@ def screenshots(rows):
     shots = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=os.environ.get("CHROMIUM_PATH") or None)
-        ctx = browser.new_context(viewport={"width": 600, "height": 1200}, device_scale_factor=2)
+        # Central time so the date printed on the embed matches the sheet's Date (CT) column
+        ctx = browser.new_context(viewport={"width": 600, "height": 1200}, device_scale_factor=2,
+                                  timezone_id="America/Chicago")
         for r in rows:
             pid = r["post_id"]
             page = ctx.new_page()  # fresh page per post so a failed load can't break the next one
@@ -375,11 +346,17 @@ def main():
         print(f"Not configured yet (missing secrets: {', '.join(missing)}); skipping run.")
         return
     backfill_pages = int(os.environ.get("BACKFILL_PAGES") or 0)
+    if wayback_keys():
+        try:
+            done = sheet_call("check_archives", {"wayback": wayback_keys()})
+            print(f"Archive links resolved: {done.get('resolved', 0)}, still pending: {done.get('pending', 0)}")
+        except Exception as e:  # archive checks must never stop the run
+            print(f"Archive check skipped: {e}")
     latest = None if backfill_pages else sheet_call("latest_id").get("latest_id")
     max_pages = backfill_pages or (5 if latest else 1)  # an empty sheet starts with the newest page only
     posts, includes = get_posts(latest, max_pages)
     known = set(sheet_call("known_ids").get("ids", [])) if backfill_pages else set()
-    posts = [p for p in posts if p["id"] not in known]
+    posts = list({p["id"]: p for p in posts if p["id"] not in known}.values())  # a post can appear twice across pages
     if not posts:
         print("No new posts.")
         return
@@ -389,16 +366,8 @@ def main():
     rows = [normalize(p, includes) for p in posts]
     print(f"{len(rows)} new posts")
 
-    jobs = {}
-    for r in rows:
-        job = wayback_submit(r["link"])
-        if job:
-            jobs[r["post_id"]] = (r["link"], job)
-        time.sleep(1)  # stay well under Save Page Now's per-minute limit
-
     labels = classify(rows)
     shots = screenshots(rows)
-    archives = wayback_results(jobs) if jobs else {}
 
     for i in range(0, len(rows), 10):
         payload = []
@@ -417,12 +386,11 @@ def main():
                 "text": r["text"],
                 "category": cat,
                 "description": lab.get("description", ""),
-                "archive": archives.get(pid, "not submitted"),
                 "screenshot_name": f"{r['date_ct'][:10]}-elonmusk-{pid}.png",
                 "screenshot_b64": base64.b64encode(png).decode() if png else None,
                 "screenshot_method": method,
             })
-        res = sheet_call("append", {"rows": payload})
+        res = sheet_call("append", {"rows": payload, "wayback": wayback_keys()})
         print(f"Appended {res.get('appended')} rows")
 
 

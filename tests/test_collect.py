@@ -61,7 +61,6 @@ def test_main_end_to_end(monkeypatch):
     assert sent[0]["category"] == "Tesla"
     assert sent[1]["link"] == "https://x.com/alice/status/900"
     assert sent[0]["screenshot_name"] == "2026-10-17-elonmusk-1849000000000000003.png"
-    assert sent[0]["archive"] == "not submitted"
 
 def test_getxapi_conversion(monkeypatch):
     musk = {"id": "44196397", "userName": "elonmusk", "name": "Elon Musk"}
