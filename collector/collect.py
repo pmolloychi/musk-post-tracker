@@ -2,13 +2,13 @@
 
 One run:
   1. Ask the Apps Script endpoint for the newest Post ID already logged.
-  2. Fetch newer posts from the X API (pay-per-use; each post returned is billed once per UTC day).
+  2. Fetch newer posts from GetXAPI (default, $0.001 per ~20-post page) or the official X API (SOURCE=x).
   3. Categorize and describe the whole batch in one Claude call.
   4. Submit each post to the Wayback Machine (best effort).
   5. Screenshot each post from X's official embed (falls back to a labeled card rendered from API data).
   6. Send rows + screenshots to the Apps Script endpoint, which appends to the sheet and saves images to Drive.
 
-Env: X_BEARER_TOKEN, ANTHROPIC_API_KEY, SHEET_ENDPOINT, SHEET_SECRET,
+Env: GETXAPI_KEY (or X_BEARER_TOKEN with SOURCE=x), ANTHROPIC_API_KEY, SHEET_ENDPOINT, SHEET_SECRET,
      optional WAYBACK_ACCESS_KEY / WAYBACK_SECRET_KEY, BACKFILL_PAGES, MAX_POSTS.
 """
 
@@ -78,6 +78,81 @@ def fetch_posts(since_id, max_pages):
     return posts, includes
 
 
+# ---------- GetXAPI (third-party, scraping-backed) ----------
+# Converts GetXAPI's responses into the same X API v2 shape so nothing downstream changes.
+
+GETXAPI = "https://api.getxapi.com"
+
+
+def _id_gt(a, b):
+    return len(a) > len(b) or (len(a) == len(b) and a > b)
+
+
+def _getx_to_v2(t, posts, includes):
+    """Add one GetXAPI tweet (and any tweet it embeds) to v2-shaped lists. Returns its id."""
+    author = t.get("author") or {}
+    if author.get("id"):
+        includes["users"].append({"id": author["id"], "username": author.get("userName", "i"),
+                                  "name": author.get("name", "")})
+    created = datetime.strptime(t["createdAt"], "%a %b %d %H:%M:%S %z %Y")
+    v2 = {"id": str(t["id"]), "text": t.get("text", ""), "author_id": author.get("id"),
+          "created_at": created.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")}
+    refs = []
+    rt = t.get("retweeted_tweet")
+    if rt:
+        refs.append({"type": "retweeted", "id": _getx_to_v2(rt, None, includes)})
+    elif t.get("text", "").startswith("RT @"):
+        v2["_rt_text_only"] = True  # retweet without the original attached; keep the RT text as-is
+    qt = t.get("quoted_tweet")
+    if qt:
+        refs.append({"type": "quoted", "id": _getx_to_v2(qt, None, includes)})
+    if t.get("isReply") and t.get("inReplyToId"):
+        refs.append({"type": "replied_to", "id": str(t["inReplyToId"])})
+        if t.get("inReplyToUsername"):
+            v2["_reply_to_username"] = t["inReplyToUsername"]
+    if refs:
+        v2["referenced_tweets"] = refs
+    (posts if posts is not None else includes["tweets"]).append(v2)
+    return v2["id"]
+
+
+def fetch_posts_getxapi(since_id, max_pages):
+    """Pages newest-first through tweets_and_replies until it reaches posts already logged."""
+    headers = {"Authorization": f"Bearer {os.environ['GETXAPI_KEY']}"}
+    params = {"userName": "elonmusk"}
+    posts, includes = [], {"tweets": [], "users": [], "media": []}
+    for _ in range(max_pages):
+        r = requests.get(f"{GETXAPI}/twitter/user/tweets_and_replies", headers=headers, params=params, timeout=60)
+        if r.status_code == 429:
+            print("GetXAPI rate limit; waiting 30s")
+            time.sleep(30)
+            continue
+        r.raise_for_status()
+        data = r.json()
+        page = data.get("tweets", [])
+        new_on_page = 0
+        for t in page:
+            # tweets_and_replies can include other people's posts in a thread; keep only his
+            if (t.get("author") or {}).get("userName", "elonmusk").lower() != "elonmusk":
+                continue
+            if since_id and not _id_gt(str(t["id"]), since_id):
+                continue  # already logged (or the pinned post)
+            _getx_to_v2(t, posts, includes)
+            new_on_page += 1
+        if since_id and page and new_on_page == 0:
+            break  # whole page is older than what we have
+        if not data.get("has_more") or not data.get("next_cursor"):
+            break
+        params["cursor"] = data["next_cursor"]
+    return posts, includes
+
+
+def get_posts(since_id, max_pages):
+    if os.environ.get("SOURCE", "getxapi") == "getxapi":
+        return fetch_posts_getxapi(since_id, max_pages * 5)  # GetXAPI pages hold ~20 posts, not 100
+    return fetch_posts(since_id, max_pages)
+
+
 def full_text(t):
     return (t.get("note_tweet") or {}).get("text") or t.get("text", "")
 
@@ -125,6 +200,10 @@ def normalize(post, includes):
         p = ref_info(refs["replied_to"])
         if p:
             row["context"] = f"Replying to @{p['username']}: {p['text']}"
+        elif post.get("_reply_to_username"):
+            row["context"] = f"Replying to @{post['_reply_to_username']} (parent text not fetched)"
+    elif post.get("_rt_text_only"):
+        row["type"] = "Retweet"
     else:
         row["type"] = "Standalone"
     return row
@@ -274,14 +353,15 @@ def screenshots(rows):
 # ---------- Main ----------
 
 def main():
-    missing = [k for k in ("X_BEARER_TOKEN", "ANTHROPIC_API_KEY", "SHEET_ENDPOINT", "SHEET_SECRET") if not os.environ.get(k)]
+    source_key = "GETXAPI_KEY" if os.environ.get("SOURCE", "getxapi") == "getxapi" else "X_BEARER_TOKEN"
+    missing = [k for k in (source_key, "ANTHROPIC_API_KEY", "SHEET_ENDPOINT", "SHEET_SECRET") if not os.environ.get(k)]
     if missing:
         print(f"Not configured yet (missing secrets: {', '.join(missing)}); skipping run.")
         return
     backfill_pages = int(os.environ.get("BACKFILL_PAGES") or 0)
     latest = None if backfill_pages else sheet_call("latest_id").get("latest_id")
     max_pages = backfill_pages or 5
-    posts, includes = fetch_posts(latest, max_pages)
+    posts, includes = get_posts(latest, max_pages)
     known = set(sheet_call("known_ids").get("ids", [])) if backfill_pages else set()
     posts = [p for p in posts if p["id"] not in known]
     if not posts:

@@ -32,7 +32,9 @@ jobs:
       - name: Collect
         working-directory: collector
         env:
+          GETXAPI_KEY: ${{ secrets.GETXAPI_KEY }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          SOURCE: ${{ vars.SOURCE || 'getxapi' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SHEET_ENDPOINT: ${{ secrets.SHEET_ENDPOINT }}
           SHEET_SECRET: ${{ secrets.SHEET_SECRET }}

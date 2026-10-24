@@ -42,7 +42,7 @@ def test_main_end_to_end(monkeypatch):
         if action == "append":
             sent.extend(payload["rows"]); return {"ok": True, "appended": len(payload["rows"])}
     monkeypatch.setattr(collect, "sheet_call", fake_sheet)
-    monkeypatch.setattr(collect, "fetch_posts", lambda since, pages: (POSTS, INCLUDES))
+    monkeypatch.setattr(collect, "get_posts", lambda since, pages: (POSTS, INCLUDES))
     monkeypatch.setattr(collect, "screenshots", lambda rows: {r["post_id"]: (b"png", "X embed") for r in rows})
 
     class FakeMessages:
@@ -54,7 +54,7 @@ def test_main_end_to_end(monkeypatch):
     monkeypatch.setattr(collect.anthropic, "Anthropic", lambda: types.SimpleNamespace(beta=types.SimpleNamespace(messages=FakeMessages())))
     monkeypatch.delenv("WAYBACK_ACCESS_KEY", raising=False)
     monkeypatch.delenv("BACKFILL_PAGES", raising=False)
-    for k in ("X_BEARER_TOKEN", "ANTHROPIC_API_KEY", "SHEET_ENDPOINT", "SHEET_SECRET"):
+    for k in ("GETXAPI_KEY", "ANTHROPIC_API_KEY", "SHEET_ENDPOINT", "SHEET_SECRET"):
         monkeypatch.setenv(k, "test")
     collect.main()
     assert len(sent) == 4
@@ -62,3 +62,35 @@ def test_main_end_to_end(monkeypatch):
     assert sent[1]["link"] == "https://x.com/alice/status/900"
     assert sent[0]["screenshot_name"] == "2026-10-17-elonmusk-1849000000000000003.png"
     assert sent[0]["archive"] == "not submitted"
+
+def test_getxapi_conversion(monkeypatch):
+    musk = {"id": "44196397", "userName": "elonmusk", "name": "Elon Musk"}
+    alice = {"id": "1", "userName": "alice", "name": "Alice"}
+    page = {"has_more": True, "next_cursor": "c2", "tweets": [
+        {"id": "1849000000000000009", "createdAt": "Sat Oct 18 04:25:00 +0000 2026", "text": "pinned old one", "author": musk},
+        {"id": "1849000000000000020", "createdAt": "Sat Oct 18 05:00:00 +0000 2026", "text": "RT @alice: hi", "author": musk,
+         "retweeted_tweet": {"id": "900", "createdAt": "Fri Oct 17 05:00:00 +0000 2026", "text": "hi there in full", "author": alice}},
+        {"id": "1849000000000000021", "createdAt": "Sat Oct 18 06:00:00 +0000 2026", "text": "@alice True", "author": musk,
+         "isReply": True, "inReplyToId": "901", "inReplyToUsername": "alice"},
+        {"id": "1849000000000000022", "createdAt": "Sat Oct 18 07:00:00 +0000 2026", "text": "Wow", "author": musk,
+         "quoted_tweet": {"id": "902", "createdAt": "Fri Oct 17 05:00:00 +0000 2026", "text": "quoted text", "author": alice}},
+        {"id": "1849000000000000023", "createdAt": "Sat Oct 18 07:30:00 +0000 2026", "text": "someone else in thread", "author": alice},
+    ]}
+    old_page = {"has_more": True, "next_cursor": "c3", "tweets": [
+        {"id": "1849000000000000001", "createdAt": "Sat Oct 18 01:00:00 +0000 2026", "text": "old", "author": musk}]}
+    calls = []
+    def fake_get(url, headers, params, timeout):
+        calls.append(dict(params))
+        assert url.endswith("/twitter/user/tweets_and_replies") and headers["Authorization"] == "Bearer k"
+        return types.SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+                                     json=lambda: page if "cursor" not in params else old_page)
+    monkeypatch.setattr(collect.requests, "get", fake_get)
+    monkeypatch.setenv("GETXAPI_KEY", "k")
+    posts, inc = collect.get_posts("1849000000000000010", 5)
+    assert len(calls) == 2  # stops after a page with nothing new
+    rows = [collect.normalize(p, inc) for p in sorted(posts, key=lambda p: int(p["id"]))]
+    assert [r["type"] for r in rows] == ["Retweet", "Reply", "Quote"]
+    assert rows[0]["text"] == "RT @alice: hi there in full" and rows[0]["screenshot_id"] == "900"
+    assert rows[1]["context"] == "Replying to @alice (parent text not fetched)"
+    assert rows[2]["context"] == "Quoting @alice: quoted text"
+    assert rows[0]["date_ct"] == "2026-10-18 00:00"
