@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#15171C; --muted:#5B616E; --line:#E3E5EA; --bg:#F4F5F7; --red:#B42318; --amber-bg:#FFF8EE; --amber:#7A3E00; --blue:#1D4ED8; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans',system-ui,sans-serif; font-size:15px; }
+  a { color:var(--blue); }
+  .mono { font-family:'IBM Plex Mono',monospace; }
+  header { background:var(--ink); color:#fff; }
+  .bar { max-width:1320px; margin:0 auto; padding:12px 20px; display:flex; flex-wrap:wrap; gap:12px 20px; align-items:center; }
+  .brand { font-weight:700; font-size:16px; }
+  nav { display:flex; flex-wrap:wrap; gap:4px; }
+  nav button { font:inherit; font-size:14px; color:#D6DAE1; background:none; border:0; padding:8px 12px; border-radius:6px; cursor:pointer; min-height:40px; }
+  nav button[aria-pressed="true"] { background:#2C303A; color:#fff; }
+  nav .n { font-family:'IBM Plex Mono',monospace; color:#FDBA74; margin-left:4px; }
+  .tools { margin-left:auto; display:flex; flex-wrap:wrap; gap:8px; }
+  .tools input, .tools select { font:inherit; font-size:14px; min-height:40px; padding:6px 10px; border-radius:6px; border:1px solid #444; background:#22252D; color:#fff; }
+  .tools input { width:260px; }
+  main { max-width:1320px; margin:0 auto; padding:20px; display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start; }
+  #list { flex:1 1 300px; max-width:400px; display:flex; flex-direction:column; gap:8px; }
+  #detail { flex:999 1 560px; min-width:0; background:#fff; border:1px solid var(--line); border-radius:12px; padding:22px; display:flex; flex-direction:column; gap:18px; }
+  .item { text-align:left; font:inherit; background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px 14px; cursor:pointer; display:flex; flex-direction:column; gap:6px; width:100%; color:inherit; }
+  .item[aria-current="true"] { border:2px solid var(--ink); padding:11px 13px; }
+  .item .t { font-size:14px; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .item .m { font-size:12px; color:var(--muted); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:999px; font-size:12px; font-weight:500; border:1px solid #D5D8DE; background:#fff; color:#3A3F4B; }
+  .chip.flag { background:#FFF4E5; border-color:#F5C58A; color:var(--amber); }
+  .chip.ok { background:var(--red); border-color:var(--red); color:#fff; }
+  .chip.warn { border-color:var(--red); color:var(--red); }
+  .lbl { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  .pair { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; }
+  .box { border:1px solid var(--line); border-radius:10px; padding:14px 16px; background:#FAFAFB; }
+  .box.his { border:2px solid var(--ink); background:#fff; }
+  .txt { white-space:pre-wrap; line-height:1.5; margin-top:6px; overflow-wrap:anywhere; }
+  .his .txt { font-size:17px; }
+  .ai { background:var(--amber-bg); border:1px solid #F5C58A; border-radius:10px; padding:12px 16px; display:flex; flex-direction:column; gap:6px; }
+  .ai .lbl { color:var(--amber); }
+  .shot { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--bg); min-height:80px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:14px; }
+  .shot img { display:block; max-width:100%; height:auto; margin:0 auto; }
+  fieldset { border:1px solid var(--line); border-radius:10px; padding:16px; margin:0; display:flex; flex-direction:column; gap:14px; }
+  legend { font-weight:700; padding:0 6px; }
+  .cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; }
+  .opts { display:flex; flex-direction:column; gap:6px; font-size:14px; }
+  .opts label { display:flex; gap:8px; align-items:center; min-height:28px; }
+  textarea { font:inherit; font-size:15px; padding:10px; border:1px solid #C9CDD4; border-radius:8px; resize:vertical; width:100%; }
+  .btn { font:inherit; font-size:14px; font-weight:600; padding:10px 16px; min-height:44px; border-radius:8px; border:1px solid #C9CDD4; background:#fff; color:var(--ink); cursor:pointer; }
+  .btn.approve { background:var(--red); border-color:var(--red); color:#fff; }
+  .btn.small { min-height:32px; padding:4px 10px; font-size:13px; }
+  .btn:disabled { opacity:.5; cursor:wait; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .err { color:var(--red); font-size:14px; font-weight:600; }
+  .hint { font-size:13px; color:var(--muted); }
+  .empty { color:var(--muted); padding:40px 10px; text-align:center; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--ink); color:#fff; padding:12px 16px; border-radius:10px; display:none; gap:14px; align-items:center; font-size:14px; z-index:5; }
+  #toast button { font:inherit; color:#FDBA74; background:none; border:0; font-weight:700; cursor:pointer; min-height:32px; }
+  @media (max-width: 700px) { .tools { margin-left:0; width:100%; } .tools input { flex:1; width:auto; } #list { max-width:none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">Musk Record <span style="font-weight:400;color:#AEB4BF">· review</span></div>
+    <nav id="views" aria-label="Views">
+      <button data-view="flagged" aria-pressed="true">AI-flagged<span class="n" id="n-flagged"></span></button>
+      <button data-view="unreviewed" aria-pressed="false">All unreviewed<span class="n" id="n-unreviewed"></span></button>
+      <button data-view="approved" aria-pressed="false">Approved<span class="n" id="n-approved"></span></button>
+      <button data-view="rejected" aria-pressed="false">Rejected<span class="n" id="n-rejected"></span></button>
+      <button data-view="all" aria-pressed="false">Everything<span class="n" id="n-all"></span></button>
+    </nav>
+    <div class="tools">
+      <label><span style="position:absolute;left:-9999px">Search</span><input id="q" type="search" placeholder="Search text, replies, @accounts"></label>
+      <label><span style="position:absolute;left:-9999px">Sort</span>
+        <select id="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section id="list" aria-label="Posts"><div class="empty">Loading…</div></section>
+  <section id="detail" aria-label="Selected post"><div class="empty">Loading…</div></section>
+</main>
+<div id="toast" role="status"><span id="toast-msg"></span><button id="undo">Undo</button></div>
+
+<script>
+const S = { view: 'flagged', q: '', sort: 'newest', offset: 0, posts: [], total: 0, sel: -1, cfg: null, shots: new Map(), undo: null };
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const isUrl = s => /^https?:\/\//.test(String(s || ''));
+const split = s => String(s || '').split(';').map(x => x.trim()).filter(x => x && x !== 'None');
+
+function call(fn, ...args) {
+  return new Promise((res, rej) => google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args));
+}
+
+async function load(keepId) {
+  $('list').innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const r = await call('list', S.view, S.q, S.sort, S.offset);
+    S.posts = r.posts; S.total = r.total;
+    for (const k in r.counts) $('n-' + k).textContent = r.counts[k];
+    const i = keepId ? S.posts.findIndex(p => p.id === keepId) : -1;
+    S.sel = i >= 0 ? i : (S.posts.length ? 0 : -1);
+    renderList(); renderDetail();
+  } catch (e) {
+    $('list').innerHTML = '<div class="err">' + esc(e.message || e) + '</div>';
+  }
+}
+
+function renderList() {
+  if (!S.posts.length) {
+    $('list').innerHTML = '<div class="empty">Nothing here.</div>';
+    return;
+  }
+  const html = S.posts.map((p, i) => {
+    const flags = split(p.flag).map(f => '<span class="chip flag">' + esc(f) + '</span>').join('');
+    const done = p.finding ? '<span class="chip ' + (p.finding === 'Approved' ? 'ok' : '') + '">' + esc(p.finding) + '</span>' : '';
+    const who = (String(p.context || '').match(/@\w+/) || [''])[0];
+    return '<button class="item" data-i="' + i + '" aria-current="' + (i === S.sel) + '">' +
+      '<span class="chips"><span class="chip">' + esc(p.type) + '</span>' + flags + done + '</span>' +
+      '<span class="t">' + esc(p.text) + '</span>' +
+      '<span class="m"><span class="mono">' + esc(p.date) + '</span>' + (who ? ' · ' + esc(who) : '') + '</span></button>';
+  }).join('');
+  const end = S.offset + S.posts.length;
+  const pager = '<div class="row hint" style="justify-content:space-between;padding:4px 2px">' +
+    '<span>' + (S.offset + 1) + '–' + end + ' of ' + S.total + '</span><span class="row">' +
+    (S.offset > 0 ? '<button class="btn small" id="prev">Previous</button>' : '') +
+    (end < S.total ? '<button class="btn small" id="next">More</button>' : '') + '</span></div>';
+  $('list').innerHTML = html + pager;
+  $('list').querySelectorAll('.item').forEach(b => b.onclick = () => select(Number(b.dataset.i)));
+  if ($('prev')) $('prev').onclick = () => { S.offset = Math.max(0, S.offset - 50); load(); };
+  if ($('next')) $('next').onclick = () => { S.offset += 50; load(); };
+}
+
+function select(i) {
+  if (i < 0 || i >= S.posts.length) return;
+  S.sel = i; renderList(); renderDetail();
+  const el = $('list').querySelector('[data-i="' + i + '"]');
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
+function defaultConduct(p) {
+  if (p.conduct) return p.conduct;
+  if (p.type === 'Retweet') return 'Retweeted';
+  if (p.type === 'Quote') return 'Quoted with comment';
+  if (p.type === 'Standalone') return 'Original statement';
+  return '';
+}
+
+function renderDetail() {
+  const p = S.posts[S.sel];
+  if (!p) { $('detail').innerHTML = '<div class="empty">Pick a post on the left.</div>'; return; }
+  const cfg = S.cfg;
+  const harm = new Set(split(p.harmType));
+  const conduct = defaultConduct(p);
+  const ctxText = String(p.context || '').replace(/^(Replying to|Quoting|Retweet of) /, '');
+  const archive = isUrl(p.archive) ? '<a href="' + esc(p.archive) + '" target="_blank" rel="noopener">Archived copy</a>' : '';
+  const deleted = p.status && p.status !== 'Live' ? '<span class="chip warn">' + esc(p.status) + '</span>' : '';
+  const recon = p.shotSource === 'Reconstructed';
+
+  $('detail').innerHTML =
+    '<div class="chips"><span class="chip">' + esc(p.type) + '</span><span class="chip mono">' + esc(p.date) + ' CT</span>' +
+      '<span class="chip mono">ID ' + esc(p.id) + '</span>' + deleted +
+      (p.finding ? '<span class="chip ' + (p.finding === 'Approved' ? 'ok' : '') + '">' + esc(p.finding) + (p.reviewedAt ? ' · ' + esc(p.reviewedAt) : '') + '</span>' : '') +
+      '<span style="margin-left:auto" class="row">' + archive + (isUrl(p.link) ? '<a href="' + esc(p.link) + '" target="_blank" rel="noopener">Open on X</a>' : '') + '</span></div>' +
+
+    '<div class="pair">' +
+      (p.context ? '<div class="box"><div class="lbl">' + esc((String(p.context).match(/^(Replying to|Quoting|Retweet of)/) || ['Responding to'])[0]) + '</div>' +
+        '<div class="txt">' + esc(ctxText) + '</div>' +
+        (isUrl(p.contextLink) ? '<a href="' + esc(p.contextLink) + '" target="_blank" rel="noopener" style="font-size:13px;display:inline-block;margin-top:8px">Their post</a>' : '') + '</div>' : '') +
+      '<div class="box his"><div class="lbl">Musk wrote</div><div class="txt">' + esc(p.text) + '</div></div>' +
+    '</div>' +
+
+    '<div class="ai"><div class="lbl">Claude\'s flag: a suggestion, not a finding</div>' +
+      '<div><b>' + esc(split(p.flag).join(', ') || 'No flag') + '.</b> ' + esc(p.flagReason) + '</div>' +
+      '<div class="hint" style="color:var(--amber)">Topic: ' + esc(p.category) + (p.description ? ' · ' + esc(p.description) : '') + '</div></div>' +
+
+    '<div class="shot" id="shot">' + (p.shot ? 'Loading screenshot…' : 'No screenshot') + '</div>' +
+    (recon ? '<div class="err">This screenshot is a reconstructed card, not X\'s own embed. Don\'t publish it as evidence.</div>' : '') +
+
+    '<fieldset><legend>Your decision</legend>' +
+      '<div class="cols">' +
+        '<div class="opts"><div class="lbl">Harm type</div>' +
+          cfg.harmTypes.map(h => '<label><input type="checkbox" name="harm" value="' + esc(h) + '"' + (harm.has(h) ? ' checked' : '') + '> ' + esc(h) + '</label>').join('') +
+          (split(p.flag).length ? '<div><button class="btn small" id="useflags" type="button">Check Claude\'s flags</button></div>' : '') + '</div>' +
+        '<div class="opts"><div class="lbl">What he did</div>' +
+          cfg.conducts.map(c => '<label><input type="radio" name="conduct" value="' + esc(c) + '"' + (c === conduct ? ' checked' : '') + '> ' + esc(c) + '</label>').join('') + '</div>' +
+      '</div>' +
+      '<label class="opts"><span class="lbl">Rationale: the sentence you would publish</span>' +
+        '<textarea id="rationale" rows="3" placeholder="Musk replied &quot;…&quot; to a post claiming …, which is antisemitic because …">' + esc(p.rationale) + '</textarea></label>' +
+      '<div class="row">' +
+        '<button class="btn approve" id="approve" type="button">Approve finding</button>' +
+        '<button class="btn" id="reject" type="button">Reject</button>' +
+        '<button class="btn" id="skip" type="button">Skip for now</button>' +
+        (p.finding ? '<button class="btn" id="clear" type="button">Clear decision</button>' : '') +
+      '</div>' +
+      '<div id="err" class="err" role="alert"></div>' +
+      '<div class="hint">Shortcuts when you\'re not typing: A approve, R reject, S skip, J and K to move down and up.</div>' +
+    '</fieldset>';
+
+  $('approve').onclick = () => decide('Approved');
+  $('reject').onclick = () => decide('Rejected');
+  $('skip').onclick = () => select(S.sel + 1);
+  if ($('clear')) $('clear').onclick = () => decide('');
+  if ($('useflags')) $('useflags').onclick = () => {
+    const f = new Set(split(p.flag));
+    document.querySelectorAll('input[name="harm"]').forEach(b => { if (f.has(b.value)) b.checked = true; });
+  };
+  if (p.shot) loadShot(p);
+}
+
+async function loadShot(p) {
+  try {
+    if (!S.shots.has(p.shot)) S.shots.set(p.shot, await call('screenshot', p.shot));
+    if (S.posts[S.sel] !== p) return;
+    const src = S.shots.get(p.shot);
+    $('shot').innerHTML = src ? '<img alt="Screenshot of the post">' : 'Screenshot not found in Drive';
+    if (src) $('shot').querySelector('img').src = src;
+  } catch (e) {
+    if (S.posts[S.sel] === p) $('shot').innerHTML = '<a href="' + esc(p.shot) + '" target="_blank" rel="noopener">Open screenshot in Drive</a>';
+  }
+}
+
+async function decide(finding) {
+  const p = S.posts[S.sel];
+  const fields = {
+    finding: finding,
+    harm_type: [...document.querySelectorAll('input[name="harm"]:checked')].map(b => b.value),
+    conduct: (document.querySelector('input[name="conduct"]:checked') || {}).value || '',
+    rationale: $('rationale').value,
+  };
+  if (finding === '') { fields.harm_type = []; fields.conduct = ''; fields.rationale = ''; }
+  if (finding === 'Approved' && (!fields.harm_type.length || !fields.conduct || !fields.rationale.trim())) {
+    $('err').textContent = 'To approve, pick at least one harm type, what he did, and write the rationale.';
+    return;
+  }
+  const prev = { finding: p.finding || '', harm_type: split(p.harmType), conduct: p.conduct || '', rationale: p.rationale || '', reviewed_at: p.reviewedAt || '' };
+  await commit(p, fields, prev, finding ? finding : 'Cleared');
+}
+
+async function commit(p, fields, prev, label) {
+  document.querySelectorAll('#detail .btn').forEach(b => b.disabled = true);
+  try {
+    const saved = await call('save', p.id, fields);
+    Object.assign(p, { finding: saved.finding, harmType: saved.harm_type, conduct: saved.conduct, rationale: saved.rationale, reviewedAt: saved.reviewed_at });
+    S.undo = { p: p, prev: prev };
+    toast(label + ' and saved to the sheet.');
+    const leaves = (S.view === 'flagged' || S.view === 'unreviewed') ? !!p.finding
+      : (S.view === 'approved' && p.finding !== 'Approved') || (S.view === 'rejected' && p.finding !== 'Rejected');
+    const i = S.posts.indexOf(p);
+    if (leaves && i >= 0) { S.posts.splice(i, 1); S.total--; S.sel = Math.min(i, S.posts.length - 1); }
+    else if (i >= 0 && i < S.posts.length - 1) S.sel = i + 1;
+    renderList(); renderDetail();
+  } catch (e) {
+    if ($('err')) $('err').textContent = 'Not saved: ' + (e.message || e);
+    document.querySelectorAll('#detail .btn').forEach(b => b.disabled = false);
+  }
+}
+
+let toastTimer;
+function toast(msg) {
+  $('toast-msg').textContent = msg;
+  $('toast').style.display = 'flex';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').style.display = 'none'; S.undo = null; }, 8000);
+}
+
+$('undo').onclick = async () => {
+  const u = S.undo;
+  if (!u) return;
+  $('toast').style.display = 'none';
+  S.undo = null;
+  try {
+    await call('save', u.p.id, u.prev);
+    toast('Undone in the app and the sheet.');
+    S.undo = null;
+    load(u.p.id);
+  } catch (e) {
+    toast('Undo failed: ' + (e.message || e));
+  }
+};
+
+document.querySelectorAll('#views button').forEach(b => b.onclick = () => {
+  S.view = b.dataset.view; S.offset = 0;
+  document.querySelectorAll('#views button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  load();
+});
+let qTimer;
+$('q').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { S.q = $('q').value; S.offset = 0; load(); }, 400); };
+$('sort').onchange = () => { S.sort = $('sort').value; S.offset = 0; load(); };
+
+document.addEventListener('keydown', e => {
+  const el = document.activeElement;
+  const typing = /TEXTAREA|SELECT/.test(el.tagName) || (el.tagName === 'INPUT' && !/checkbox|radio/.test(el.type));
+  if (e.metaKey || e.ctrlKey || e.altKey || typing) return;
+  const k = e.key.toLowerCase();
+  if (k === 'a' && $('approve')) decide('Approved');
+  else if (k === 'r' && $('reject')) decide('Rejected');
+  else if (k === 's' || k === 'j') select(S.sel + 1);
+  else if (k === 'k') select(S.sel - 1);
+});
+
+call('config').then(cfg => { S.cfg = cfg; load(); });
+</script>
+</body>
+</html>
