@@ -148,16 +148,29 @@ function defaultConduct(p) {
   if (p.conduct) return p.conduct;
   if (p.type === 'Retweet') return 'Retweeted';
   if (p.type === 'Quote') return 'Quoted with comment';
-  if (p.type === 'Standalone') return 'Original statement';
-  return '';
+  if (p.type === 'Reply' && /endors|post he (replied|answered)|parent post/i.test(p.flagReason)) return 'Endorsed another post';
+  return 'Original statement';
+}
+
+// A post with no decision yet starts from Claude's flag; a past decision shows what was saved.
+function prefill(p) {
+  const fresh = !p.finding;
+  const flags = split(p.flag);
+  return {
+    fromClaude: fresh && flags.length > 0,
+    harm: new Set(fresh && !p.harmType ? flags : split(p.harmType)),
+    conduct: defaultConduct(p),
+    rationale: p.rationale || (fresh ? (p.flagReason || (flags.length ? 'Flagged as ' + flags.join(', ') + '.' : '')) : ''),
+  };
 }
 
 function renderDetail() {
   const p = S.posts[S.sel];
   if (!p) { $('detail').innerHTML = '<div class="empty">Pick a post on the left.</div>'; return; }
   const cfg = S.cfg;
-  const harm = new Set(split(p.harmType));
-  const conduct = defaultConduct(p);
+  const pre = prefill(p);
+  const harm = pre.harm;
+  const conduct = pre.conduct;
   const ctxText = String(p.context || '').replace(/^(Replying to|Quoting|Retweet of) /, '');
   const archive = isUrl(p.archive) ? '<a href="' + esc(p.archive) + '" target="_blank" rel="noopener">Archived copy</a>' : '';
   const deleted = p.status && p.status !== 'Live' ? '<span class="chip warn">' + esc(p.status) + '</span>' : '';
@@ -187,12 +200,13 @@ function renderDetail() {
       '<div class="cols">' +
         '<div class="opts"><div class="lbl">Harm type</div>' +
           cfg.harmTypes.map(h => '<label><input type="checkbox" name="harm" value="' + esc(h) + '"' + (harm.has(h) ? ' checked' : '') + '> ' + esc(h) + '</label>').join('') +
-          (split(p.flag).length ? '<div><button class="btn small" id="useflags" type="button">Check Claude\'s flags</button></div>' : '') + '</div>' +
+          '</div>' +
         '<div class="opts"><div class="lbl">What he did</div>' +
           cfg.conducts.map(c => '<label><input type="radio" name="conduct" value="' + esc(c) + '"' + (c === conduct ? ' checked' : '') + '> ' + esc(c) + '</label>').join('') + '</div>' +
       '</div>' +
       '<label class="opts"><span class="lbl">Rationale: the sentence you would publish</span>' +
-        '<textarea id="rationale" rows="3" placeholder="Musk replied &quot;…&quot; to a post claiming …, which is antisemitic because …">' + esc(p.rationale) + '</textarea></label>' +
+        '<textarea id="rationale" rows="3" placeholder="Musk replied &quot;…&quot; to a post claiming …, which is antisemitic because …">' + esc(pre.rationale) + '</textarea></label>' +
+      (pre.fromClaude ? '<div class="hint">Filled in from Claude\'s flag. Change anything before you approve, or approve as is.</div>' : '') +
       '<div class="row">' +
         '<button class="btn approve" id="approve" type="button">Approve finding</button>' +
         '<button class="btn" id="reject" type="button">Reject</button>' +
@@ -207,10 +221,6 @@ function renderDetail() {
   $('reject').onclick = () => decide('Rejected');
   $('skip').onclick = () => select(S.sel + 1);
   if ($('clear')) $('clear').onclick = () => decide('');
-  if ($('useflags')) $('useflags').onclick = () => {
-    const f = new Set(split(p.flag));
-    document.querySelectorAll('input[name="harm"]').forEach(b => { if (f.has(b.value)) b.checked = true; });
-  };
   if (p.shot) loadShot(p);
 }
 

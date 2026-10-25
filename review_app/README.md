@@ -22,10 +22,12 @@ After you paste a new version of either file: **Deploy > Manage deployments > ed
 
 - **Views:** AI-flagged (flagged and not yet reviewed), All unreviewed, Approved, Rejected, Everything. Each one shows a count.
 - **Search** looks through his text, the post he responded to, @accounts, Claude's flag reason and description, and your rationale.
-- **Approve finding** needs at least one harm type, what he did, and a rationale. **Reject** needs nothing. **Skip for now**
+- **Approve finding** saves whatever the form holds, and needs at least one harm type, what he did, and a rationale. **Reject** needs nothing. **Skip for now**
   moves on without saving anything.
 - Saving writes Finding, Harm type, Conduct, Rationale and Reviewed at (Central time) to that post's row. An Undo link
   appears for 8 seconds after each save. **Clear decision** blanks a past decision.
-- Harm types start unchecked, so Claude's flag doesn't make the call for you. **Check Claude's flags** ticks them in one click.
+- On a post with no decision yet, harm type, what he did and the rationale are filled in from Claude's flag and flag reason.
+  Approve as is, or change any of them first. What he did comes from the post type; for replies it picks "Endorsed another post"
+  when Claude's reason says the words came from the post he replied to.
 - Keyboard shortcuts, when you're not typing in a box: A approves, R rejects, S skips, and J and K move down and up.
 - Reconstructed screenshots get a warning. They're cards built from API data, not X's own embed, so don't publish them as evidence.
