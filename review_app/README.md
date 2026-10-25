@@ -1,20 +1,17 @@
 # Review app
 
 A private web page for going through flagged posts and approving or rejecting each one. It runs as its own Apps Script
-project under your Google account. It reads the Musk Post Tracker sheet directly and saves every decision through the
-sheet script's `review` action, so the app and the sheet always show the same thing.
+project under your Google account. It reads and writes the Musk Post Tracker sheet directly, so the app and the sheet always show
+the same thing. It only ever writes the five reviewer columns, which the collector never touches.
 
 ## Set it up (about 5 minutes)
 
 1. Go to [script.google.com](https://script.google.com) and click **New project**. Name it "Musk Record review".
 2. Replace the contents of `Code.gs` with [`Code.gs`](Code.gs).
 3. Click **+** next to Files, choose **HTML**, name it `Index`, and replace its contents with [`Index.html`](Index.html).
-4. Go to **Project Settings > Script properties** and add two properties:
-   - `SHEET_ENDPOINT`: the sheet's web app URL (the same value as the `SHEET_ENDPOINT` repo secret).
-   - `SHEET_SECRET`: the sheet script's `SECRET` (the same value as the `SHEET_SECRET` repo secret).
-5. Click **Deploy > New deployment > Web app**. Set **Execute as: Me** and **Who has access: Only myself**, then click **Deploy**.
-   Approve the permissions it asks for: reading the sheet, reading screenshots in Drive, and calling the sheet endpoint.
-6. Open the web app URL and bookmark it. It only opens for you, signed in to your Google account.
+4. Click **Deploy > New deployment > Web app**. Set **Execute as: Me** and **Who has access: Only myself**, then click **Deploy**.
+   Approve the permissions it asks for: reading and editing the sheet, and reading screenshots in Drive.
+5. Open the web app URL and bookmark it. It only opens for you, signed in to your Google account.
 
 After you paste a new version of either file: **Deploy > Manage deployments > edit > Version: New version > Deploy**.
 

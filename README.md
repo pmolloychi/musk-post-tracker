@@ -64,8 +64,9 @@ description. Flag is zero or more of the labels in `collector/categories.py` (FL
 flagging, reads short replies like "True" together with the post they answer, and looks for coded language.
 Treat flags as a review queue, not findings.
 
-**Finding, Harm type, Conduct, Rationale, Reviewed at** belong to the reviewer. Only the Apps Script `review` action
-writes them. Collection, `refresh_existing` and `relabel_existing` never touch them. The review app posts:
+**Finding, Harm type, Conduct, Rationale, Reviewed at** belong to the reviewer. The review app (`review_app/`, see its
+README) writes them straight to the sheet, one row at a time. Collection, `refresh_existing` and `relabel_existing` never
+touch them. The sheet script also has a `review` action for writing them over HTTP:
 
 ```json
 {"secret": "...", "action": "review", "post_id": "1849...", "finding": "Approved",
@@ -74,7 +75,6 @@ writes them. Collection, `refresh_existing` and `relabel_existing` never touch t
 
 Finding must be Approved, Rejected or empty. Conduct must be Original statement, Endorsed another post,
 Quoted with comment, Retweeted or empty. Fields left out are left unchanged. The response is `{"ok": true, "row": N, "written": [...]}`.
-The app can read rows with `{"action": "rows"}`, or read the sheet directly.
 
 **Screenshot source** says "X embed" (X's own rendering, fit for public evidence) or "Reconstructed" (a card built from API
 data when the embed wouldn't load; don't publish these as evidence).

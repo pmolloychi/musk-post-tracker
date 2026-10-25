@@ -3,12 +3,10 @@
  *
  * This is its own Apps Script project, separate from the script bound to the sheet:
  *   1. script.google.com > New project. Paste this file as Code.gs, and add an HTML file named Index with Index.html.
- *   2. Project Settings > Script properties: SHEET_ENDPOINT (the sheet's web app URL) and SHEET_SECRET
- *      (the same SECRET the sheet script uses; it's also the SHEET_SECRET repo secret).
- *   3. Deploy > New deployment > Web app, Execute as: Me, Who has access: Only myself.
+ *   2. Deploy > New deployment > Web app, Execute as: Me, Who has access: Only myself.
  *
- * It reads the sheet directly and sends every write through the sheet script's `review` action,
- * so the reviewer columns keep a single write path.
+ * It reads and writes the sheet directly. It only ever writes the five reviewer columns of one row,
+ * which the collector never touches.
  */
 
 const SHEET_ID = '13wqF9zWxmtZ73gkdRUmUOruUhOn8DRDs2PGOEci2J-I';
@@ -84,7 +82,7 @@ function list(view, query, sort, offset) {
   return { counts: counts, total: out.length, offset: start, posts: out.slice(start, start + PAGE_SIZE) };
 }
 
-// Writes one post's reviewer columns through the sheet's `review` action. Returns the saved fields.
+// Writes one post's reviewer columns, found by Post ID and header name. Returns the saved fields.
 function save(postId, fields) {
   const finding = fields.finding || '';
   if (['Approved', 'Rejected', ''].indexOf(finding) < 0) throw new Error('Finding must be Approved, Rejected or empty.');
@@ -99,26 +97,32 @@ function save(postId, fields) {
     : (finding ? Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd HH:mm') : '');
   const saved = { finding: finding, harm_type: harm.join('; '), conduct: conduct, rationale: rationale,
                   reviewed_at: reviewedAt };
-  callSheet_(Object.assign({ action: 'review', post_id: String(postId) }, saved));
+  writeReview_(String(postId).trim(), saved);
   return saved;
 }
 
-function callSheet_(payload) {
-  const props = PropertiesService.getScriptProperties();
-  const url = props.getProperty('SHEET_ENDPOINT');
-  if (!url || !props.getProperty('SHEET_SECRET')) throw new Error('Set SHEET_ENDPOINT and SHEET_SECRET in Project Settings > Script properties.');
-  const res = UrlFetchApp.fetch(url, {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify(Object.assign({ secret: props.getProperty('SHEET_SECRET') }, payload)),
-  });
-  let data;
-  try {
-    data = JSON.parse(res.getContentText());
-  } catch (err) {
-    throw new Error('The sheet endpoint answered ' + res.getResponseCode() + ' without JSON. Check SHEET_ENDPOINT.');
-  }
-  if (!data.ok) throw new Error('The sheet endpoint refused the save: ' + data.error);
-  return data;
+const REVIEW_COLUMNS = { finding: 'Finding', harm_type: 'Harm type', conduct: 'Conduct',
+                         rationale: 'Rationale', reviewed_at: 'Reviewed at' };
+
+function writeReview_(postId, saved) {
+  const sh = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(h => String(h).trim());
+  const col = h => {
+    const i = head.indexOf(h);
+    if (i < 0) throw new Error('The sheet has no "' + h + '" column.');
+    return i + 1;
+  };
+  const n = sh.getLastRow() - 1;
+  const ids = n > 0 ? sh.getRange(2, col('Post ID'), n, 1).getDisplayValues() : [];
+  const i = ids.findIndex(r => String(r[0]).trim() === postId);
+  if (i < 0) throw new Error('Post ' + postId + ' is no longer in the sheet.');
+  for (const k in REVIEW_COLUMNS) sh.getRange(i + 2, col(REVIEW_COLUMNS[k])).setValue(safe_(saved[k]));
+}
+
+// Keep text from being read as a formula, as the sheet script does.
+function safe_(s) {
+  s = String(s == null ? '' : s);
+  return /^[=+\-@]/.test(s) ? "'" + s : s;
 }
 
 // The screenshot as a data URL, read from Drive, so it shows without sharing the file.
