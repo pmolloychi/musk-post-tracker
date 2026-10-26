@@ -29,7 +29,8 @@ on:
         default: false
 
 concurrency:
-  group: collect
+  # Date backfills get their own group, so several ranges can run side by side without blocking the hourly run.
+  group: ${{ github.event.inputs.backfill_since && format('backfill-{0}-{1}', github.event.inputs.backfill_since, github.event.inputs.backfill_until) || 'collect' }}
   cancel-in-progress: false
 
 jobs:
