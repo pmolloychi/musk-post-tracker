@@ -32,6 +32,14 @@ function doPost(e) {
   if (!body.secret || body.secret !== props.getProperty('SECRET')) {
     return json_({ ok: false, error: 'bad secret' });
   }
+  // Read-only, so it skips the lock and the layout check and never holds up the collector.
+  if (body.action === 'export') {
+    try {
+      return json_(export_());
+    } catch (err) {
+      return json_({ ok: false, error: String(err) });
+    }
+  }
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -135,6 +143,90 @@ function rows_() {
     date_ct: get(v, 'Date (CT)'), type: get(v, 'Type'), link: get(v, 'Link'), text: get(v, 'Text'),
     context: get(v, 'Responding to'), status: get(v, 'Status'), post_id: String(get(v, 'Post ID')).trim(),
   })).filter(x => x.post_id);
+}
+
+// ---------- Public site export ----------
+// The only way data leaves the sheet for the public site. Flag reason and Claude description are never read.
+// Review fields go out only for Approved posts and, once all of them are decided, the random sample.
+
+const SAMPLE_SHEET = 'Sample';
+const SAMPLE_SIZE = 100;
+const SAMPLE_FIRST_ROW = 8; // rows 1-5 hold the header block, row 7 the column names
+
+// Sheets may turn a typed 'yyyy-MM-dd HH:mm' into a Date, so normalize both kinds to the same CT string.
+function ctMinute_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'America/Chicago', 'yyyy-MM-dd HH:mm');
+  return String(v == null ? '' : v).trim();
+}
+
+// A sample post counts only if Parker decided it at or after the draw.
+function isDecided_(finding, reviewedAt, drawnAt) {
+  const at = ctMinute_(reviewedAt);
+  return String(finding || '').trim() !== '' && at !== '' && at >= drawnAt;
+}
+
+// Null when the tab is missing or the sample hasn't been drawn.
+function readSample_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SAMPLE_SHEET);
+  if (!sh || sh.getLastRow() < SAMPLE_FIRST_ROW) return null;
+  const head = sh.getRange(1, 2, 5, 1).getValues().map(r => ctMinute_(r[0]));
+  if (!head[0]) return null;
+  const rows = sh.getRange(SAMPLE_FIRST_ROW, 1, SAMPLE_SIZE, 4).getValues().map(r => ({
+    sample_no: Number(r[0]), post_id: String(r[1]).trim(), flag_at_draw: String(r[2]).trim(),
+    prior_finding: String(r[3]).trim(),
+  })).filter(x => x.post_id);
+  return { drawn_at: head[0], seed: head[1], frame_size: Number(head[2]), frame_sha256: head[3],
+           sample_sha256: head[4], rows: rows };
+}
+
+function export_() {
+  const sh = sheet_();
+  const c = cols_();
+  const r = dataRange_(1, sh.getLastColumn());
+  const shown = r ? r.getDisplayValues() : [];
+  const reviewedAt = c['Reviewed at'] && r ? dataRange_(c['Reviewed at']).getValues().map(x => x[0]) : [];
+  const get = (v, h) => (c[h] ? v[c[h] - 1] : '');
+  const rows = [];
+  const review = {};
+  shown.forEach((v, i) => {
+    const id = String(get(v, 'Post ID')).trim();
+    if (!id) return;
+    rows.push({
+      post_id: id, date_ct: get(v, 'Date (CT)'), type: get(v, 'Type'), link: get(v, 'Link'),
+      text: get(v, 'Text'), context: get(v, 'Responding to'), their_link: get(v, 'Their post link'),
+      category: get(v, 'Category'), archive_link: get(v, 'Archive link'), status: get(v, 'Status'),
+    });
+    review[id] = {
+      post_id: id, flag: get(v, 'Flag'), finding: get(v, 'Finding'), harm_type: get(v, 'Harm type'),
+      conduct: get(v, 'Conduct'), rationale: get(v, 'Rationale'), reviewed_at: ctMinute_(reviewedAt[i]),
+    };
+  });
+
+  const s = readSample_();
+  let sample = null;
+  const inSample = new Set();
+  if (s) {
+    s.rows.forEach(x => inSample.add(x.post_id));
+    const decided = s.rows.filter(x => review[x.post_id] &&
+      isDecided_(review[x.post_id].finding, review[x.post_id].reviewed_at, s.drawn_at)).length;
+    const complete = s.rows.length === SAMPLE_SIZE && decided === SAMPLE_SIZE;
+    sample = {
+      drawn_at: s.drawn_at, frame_size: s.frame_size, frame_sha256: s.frame_sha256,
+      sample_sha256: s.sample_sha256, decided_count: decided,
+      seed: complete ? s.seed : null, ids: complete ? s.rows : null,
+    };
+  }
+
+  // Until the sample is complete, sample posts stay out entirely, so neither membership nor partial results leak.
+  const out = [];
+  for (const id in review) {
+    const x = review[id];
+    if (inSample.has(id) ? (sample && sample.ids) : x.finding === 'Approved') out.push(x);
+  }
+  return {
+    ok: true, generated_at: Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd HH:mm'),
+    rows: rows, sample: sample, reviewed: out,
+  };
 }
 
 function folderFor_(dateCt) {

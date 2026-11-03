@@ -18,6 +18,12 @@ const HARM_TYPES = ['Antisemitism', 'Racism', 'Anti-immigrant/xenophobia', 'Isla
                     'Anti-trans', 'Homophobia', 'Misogyny', 'Ableism'];
 const CONDUCTS = ['Original statement', 'Endorsed another post', 'Quoted with comment', 'Retweeted'];
 
+// The random sample for the public site's upheld rate. Layout mirrors readSample_ in apps_script/Code.gs:
+// B1:B5 hold drawn_at, seed, frame_size, frame_sha256, sample_sha256; row 7 is the header; posts start at row 8.
+const SAMPLE_SHEET = 'Sample';
+const SAMPLE_SIZE = 100;
+const SAMPLE_FIRST_ROW = 8;
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Musk Record review')
@@ -25,7 +31,9 @@ function doGet() {
 }
 
 function config() {
-  return { harmTypes: HARM_TYPES, conducts: CONDUCTS };
+  const s = readSample_();
+  return { harmTypes: HARM_TYPES, conducts: CONDUCTS,
+           sample: { drawn: !!s, decided: s ? sampleState_(s).decided : 0, size: SAMPLE_SIZE } };
 }
 
 // Every row as {header: display value}, found by header name so column moves don't matter.
@@ -64,22 +72,140 @@ const VIEWS = {
 };
 
 // One page of posts for a view, filtered by a search string and sorted by date.
+// The sample view keeps sample order instead, and counts what's left to decide.
 function list(view, query, sort, offset) {
   const posts = readRows_().map(toPost_);
   const counts = {};
   for (const k in VIEWS) counts[k] = posts.filter(VIEWS[k]).length;
+  const s = readSample_();
+  const state = s ? sampleState_(s, posts) : null;
+  counts.sample = state ? state.posts.length - state.decided : '';
   const q = String(query || '').trim().toLowerCase();
-  let out = posts.filter(VIEWS[view] || VIEWS.flagged);
+  let out;
+  if (view === 'sample') {
+    out = state ? state.posts : [];
+  } else {
+    out = posts.filter(VIEWS[view] || VIEWS.flagged);
+    // Dates are "YYYY-MM-DD HH:MM", so string order is time order; IDs break ties.
+    const key = p => p.date + ' ' + ('0000000000000000000000' + p.id).slice(-22);
+    out.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+    if (sort !== 'oldest') out.reverse();
+  }
   if (q) {
     out = out.filter(p => [p.text, p.context, p.flag, p.flagReason, p.description, p.category, p.rationale]
       .some(s => String(s || '').toLowerCase().indexOf(q) >= 0));
   }
-  // Dates are "YYYY-MM-DD HH:MM", so string order is time order; IDs break ties.
-  const key = p => p.date + ' ' + ('0000000000000000000000' + p.id).slice(-22);
-  out.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
-  if (sort !== 'oldest') out.reverse();
   const start = Math.max(0, Number(offset) || 0);
-  return { counts: counts, total: out.length, offset: start, posts: out.slice(start, start + PAGE_SIZE) };
+  return { counts: counts, total: out.length, offset: start, posts: out.slice(start, start + PAGE_SIZE),
+           sample: { drawn: !!s, decided: state ? state.decided : 0, size: SAMPLE_SIZE } };
+}
+
+// ---------- Random sample ----------
+
+// Sheets may turn a typed 'yyyy-MM-dd HH:mm' into a Date, so normalize both kinds to the same CT string.
+function ctMinute_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'America/Chicago', 'yyyy-MM-dd HH:mm');
+  return String(v == null ? '' : v).trim();
+}
+
+// Same rule as isDecided_ in apps_script/Code.gs: only a decision made at or after the draw counts.
+function isDecided_(finding, reviewedAt, drawnAt) {
+  const at = ctMinute_(reviewedAt);
+  return String(finding || '').trim() !== '' && at !== '' && at >= drawnAt;
+}
+
+function sampleSheet_() {
+  return SpreadsheetApp.openById(SHEET_ID).getSheetByName(SAMPLE_SHEET);
+}
+
+// Null when the tab is missing or the sample hasn't been drawn.
+function readSample_() {
+  const sh = sampleSheet_();
+  if (!sh || sh.getLastRow() < SAMPLE_FIRST_ROW) return null;
+  const drawnAt = ctMinute_(sh.getRange(1, 2).getValue());
+  if (!drawnAt) return null;
+  const rows = sh.getRange(SAMPLE_FIRST_ROW, 1, SAMPLE_SIZE, 4).getValues()
+    .map(r => ({ sampleNo: Number(r[0]), id: String(r[1]).trim(), priorFinding: String(r[3]).trim() }))
+    .filter(x => x.id);
+  return { drawnAt: drawnAt, rows: rows };
+}
+
+// Raw Reviewed at by Post ID. Display values depend on the cell's format, so read the values themselves.
+function reviewedAtById_() {
+  const sh = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(h => String(h).trim());
+  const idCol = head.indexOf('Post ID') + 1, atCol = head.indexOf('Reviewed at') + 1;
+  const n = sh.getLastRow() - 1;
+  const out = {};
+  if (n < 1 || !idCol || !atCol) return out;
+  const ids = sh.getRange(2, idCol, n, 1).getDisplayValues();
+  const ats = sh.getRange(2, atCol, n, 1).getValues();
+  ids.forEach((r, i) => { out[String(r[0]).trim()] = ctMinute_(ats[i][0]); });
+  return out;
+}
+
+// The sample's posts in sample order. A post decided before the draw needs a fresh decision, so its old one is
+// hidden here and the form starts from Claude's flag, as for a post nobody has reviewed.
+function sampleState_(s, posts) {
+  const byId = {};
+  (posts || readRows_().map(toPost_)).forEach(p => { byId[p.id] = p; });
+  const at = reviewedAtById_();
+  let decided = 0;
+  const out = s.rows.filter(x => byId[x.id]).map(x => {
+    const p = Object.assign({}, byId[x.id]);
+    p.sampleNo = x.sampleNo;
+    p.sampleDecided = isDecided_(p.finding, at[p.id], s.drawnAt);
+    if (p.sampleDecided) decided++;
+    p.needsRereview = !p.sampleDecided && !!(x.priorFinding || p.finding);
+    if (!p.sampleDecided) Object.assign(p, { finding: '', harmType: '', conduct: '', rationale: '', reviewedAt: '' });
+    return p;
+  });
+  return { posts: out, decided: decided };
+}
+
+function sha256Hex_(text) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text, Utilities.Charset.UTF_8)
+    .map(b => ('0' + (b & 255).toString(16)).slice(-2)).join('');
+}
+
+// Draws the sample once. The frame is every post Claude has flagged right now, by sorted Post ID. Posts are
+// ranked by SHA-256 of "seed:id" and the first 100 taken, so anyone with the seed and the frame can redo the draw.
+function drawSample() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (readSample_()) throw new Error('The sample has already been drawn. It can only be drawn once.');
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sh = ss.getSheetByName(SAMPLE_SHEET) || ss.insertSheet(SAMPLE_SHEET);
+    if (sh.getLastRow() > 0) throw new Error('The Sample tab already has something in it. Empty it first.');
+    const posts = readRows_().map(toPost_);
+    const frame = posts.filter(isFlagged_).map(p => p.id).sort();
+    if (frame.length < SAMPLE_SIZE) throw new Error('Only ' + frame.length + ' flagged posts; the sample needs ' + SAMPLE_SIZE + '.');
+    const seed = Utilities.getUuid().replace(/-/g, '').toLowerCase();
+    const ranked = frame.map(id => ({ id: id, h: sha256Hex_(seed + ':' + id) }))
+      .sort((a, b) => (a.h < b.h ? -1 : a.h > b.h ? 1 : 0)).slice(0, SAMPLE_SIZE);
+    const ids = ranked.map(x => x.id);
+    const byId = {};
+    posts.forEach(p => { byId[p.id] = p; });
+    const at = reviewedAtById_();
+    const drawnAt = Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd HH:mm');
+    const head = [
+      ['drawn_at', drawnAt, '', '', ''],
+      ['seed', seed, '', '', ''],
+      ['frame_size', String(frame.length), '', '', ''],
+      ['frame_sha256', sha256Hex_(frame.join('\n')), '', '', ''],
+      ['sample_sha256', sha256Hex_(ids.join('\n') + '\nseed:' + seed + '\n'), '', '', ''],
+      ['', '', '', '', ''],
+      ['sample_no', 'post_id', 'flag_at_draw', 'prior_finding', 'prior_reviewed_at'],
+    ];
+    const rows = ids.map((id, i) => [String(i + 1), id, byId[id].flag || '', byId[id].finding || '', at[id] || '']);
+    const all = head.concat(rows);
+    // Plain text first, so IDs and times are stored exactly as written.
+    sh.getRange(1, 1, all.length, 5).setNumberFormat('@').setValues(all);
+    return { drawnAt: drawnAt, frameSize: frame.length };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Writes one post's reviewer columns, found by Post ID and header name. Returns the saved fields.

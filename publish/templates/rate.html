@@ -1,0 +1,9 @@
+{% macro rate(sample) %}
+{% if sample.complete %}
+<p class="rate"><strong>{{ pct(sample.headline.k, sample.headline.n) }}</strong> of {{ sample.headline.n }} randomly sampled AI-flagged posts were upheld on Parker's review
+(95% range {{ pct(sample.headline.interval[0] * 100, 100) }}–{{ pct(sample.headline.interval[1] * 100, 100) }}).</p>
+<p class="hint">The sample was drawn on {{ sample.drawn_at }} CT from {{ "{:,}".format(sample.frame_size) }} posts Claude had flagged.</p>
+{% elif sample.drawn %}
+<p class="rate">Review in progress: {{ sample.decided_count }} of {{ sample.size }} sampled posts decided.</p>
+{% endif %}
+{% endmacro %}
