@@ -24,9 +24,10 @@ After you paste a new version of either file: **Deploy > Manage deployments > ed
   moves on without saving anything.
 - Saving writes Finding, Harm type, Conduct, Rationale and Reviewed at (Central time) to that post's row. An Undo link
   appears for 8 seconds after each save. **Clear decision** blanks a past decision.
-- On a post with no decision yet, harm type and what he did are filled in from Claude's flag. The rationale always starts
-  blank: the public site publishes it as your words, so write it yourself. What he did comes from the post type; for replies
-  it picks "Endorsed another post" when Claude's reason says the words came from the post he replied to.
+- On a post with no decision yet, harm type, what he did and the rationale are filled in from Claude's flag. The rationale
+  is published as the "Why" line, so edit it if it isn't how you'd put it; the methods page says rationales may be Claude's
+  draft. What he did comes from the post type; for replies it picks "Endorsed another post" when Claude's reason says the
+  words came from the post he replied to.
 - Keyboard shortcuts, when you're not typing in a box: A approves, R rejects, S skips, and J and K move down and up.
 - Reconstructed screenshots get a warning. They're cards built from API data, not X's own embed, so don't publish them as evidence.
 

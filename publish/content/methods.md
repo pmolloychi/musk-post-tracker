@@ -1,4 +1,4 @@
-<!-- DRAFT by Claude for Parker to rewrite in his own voice before launch. -->
+<!-- DRAFT by Claude for Parker to rewrite in Parker's own voice before launch. -->
 
 This site counts every post Elon Musk made on X in 2026, as logged by an automated tracker that checks his account every hour. The tracker's code is public.
 
@@ -6,9 +6,9 @@ This site counts every post Elon Musk made on X in 2026, as logged by an automat
 
 **Retweets.** Retweets count, because choosing to share a post with his followers is a choice. Every chart shows what he wrote apart from what he retweeted.
 
-**Flags and the random sample.** Claude also suggests whether a post may be bigoted, and in what way. Those suggestions are private and never shown here, except on posts Parker has reviewed. To measure how often the suggestions hold up, 100 flagged posts were picked at random, the pick was locked in public before review began, and Parker reviewed each one. The rate counts any post he upheld. A stricter count, where his judgment of the harm matches Claude's, is shown with it.
+**Flags and the random sample.** Claude also suggests whether a post may be bigoted, and in what way. Those suggestions are private and never shown here, except on posts Parker has reviewed. To measure how often the suggestions hold up, 100 flagged posts were picked at random, the pick was locked in public before review began, and Parker reviewed each one. The rate counts any post Parker upheld. A stricter count, where Parker's judgment of the harm matches Claude's, is shown with it.
 
-**How the review form works.** When Parker reviews a post, the form starts with Claude's suggested harm type and a guess at what Musk did (wrote it, quoted it, retweeted it). Parker accepts or changes them. The rationale is always his own words.
+**How the review form works.** When Parker reviews a post, the form starts with Claude's suggested harm type, a guess at what Musk did (wrote it, quoted it, retweeted it) and Claude's one-sentence reason for the flag. Parker accepts or changes each of them. The "Why" line on a reviewed post may be Claude's draft, kept because Parker agreed with it.
 
 **What the lock proves.** The lock shows the sample was fixed before review and wasn't redrawn. It can't show that the pool it was drawn from held every flagged post, because the flags themselves stay private.
 

@@ -78,7 +78,7 @@ Do this once, right after clicking **Draw sample** in the review app, and before
 
 Don't launch until all three are done:
 
-1. You've re-read every approved finding, and each rationale is in your own words.
+1. You've re-read every approved finding, and you stand behind each rationale, including any kept from Claude's draft.
 2. A run with publishing off has passed, and you've looked over the built site.
 3. The legal read is done.
 
