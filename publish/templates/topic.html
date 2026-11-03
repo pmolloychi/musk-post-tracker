@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "card.html" import card, row %}
+{% block title %}{{ topic.name }}: What Musk Posts About, 2026{% endblock %}
+{% block main %}
+<h1>{{ topic.name }}</h1>
+<p class="sub">{{ "{:,}".format(topic.posts|length) }} posts in 2026. Some are counted under two topics.</p>
+<figure>{{ chart }}<figcaption><span class="key s-wrote"></span>He wrote <span class="key s-rt"></span>He retweeted. No data for April 10–11.</figcaption></figure>
+<details class="table"><summary>The numbers in this chart</summary>
+<table><thead><tr><th>Month</th><th>Wrote</th><th>Retweeted</th></tr></thead><tbody>
+{% for r in topic.monthly %}<tr><td>{{ month_label(r.month) }}</td><td>{{ r.wrote }}</td><td>{{ r.retweeted }}</td></tr>
+{% endfor %}</tbody></table></details>
+{% if topic.reviewed %}
+<section><h2>Reviewed by Parker</h2>
+{% for p in topic.reviewed %}{{ card(p, site.sample.size) }}{% endfor %}
+</section>
+{% endif %}
+<details class="all"><summary>Every {{ topic.name }} post ({{ "{:,}".format(topic.posts|length) }})</summary>
+<p class="hint">{{ labels.unreviewed }}. Claude, an AI model, assigned these topics; a few will be wrong. Newest first.</p>
+<ol class="posts">
+{% set ids = topic.reviewed|map(attribute='post_id')|list %}
+{% for p in topic.posts %}{{ row(p, p.post_id in ids) }}{% endfor %}
+</ol></details>
+{% endblock %}

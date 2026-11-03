@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "rate.html" import rate %}
+{% block main %}
+<section class="lede">
+  <h1><span class="swipe">{{ pct(site.meta.political_posts, site.meta.total_posts) }}</span> of Elon Musk's posts this year were about politics.</h1>
+  <p class="sub">{{ "{:,}".format(site.meta.political_posts) }} of {{ "{:,}".format(site.meta.total_posts) }} posts since January 1:
+  {{ "{:,}".format(total_wrote) }} he wrote, {{ "{:,}".format(total_rt) }} he retweeted.</p>
+  <figure>
+    {{ chart }}
+    <figcaption><span class="key s-wrote"></span>Political, he wrote <span class="key s-rt"></span>Political, he retweeted
+      <span class="key s-other"></span>Everything else. No data for April 10–11.</figcaption>
+  </figure>
+  <p class="data">Data through {{ site.meta.data_through_ct }} CT.</p>
+  {{ rate(site.sample) }}
+</section>
+<details class="table"><summary>The numbers in this chart</summary>
+<table><thead><tr><th>Month</th><th>Political, wrote</th><th>Political, retweeted</th><th>Everything else</th></tr></thead><tbody>
+{% for r in site.monthly %}<tr><td>{{ month_label(r.month) }}</td><td>{{ r.wrote_political }}</td><td>{{ r.retweeted_political }}</td><td>{{ r.other }}</td></tr>
+{% endfor %}</tbody></table></details>
+<section>
+  <h2>By topic</h2>
+  <p class="hint">Topics are assigned by Claude, an AI model, and not reviewed. A post can have two topics, so these add up to more than the total.</p>
+  <ul class="topics">
+  {% for t in topics %}<li><a href="topics/{{ t.slug }}/">{{ t.name }}</a> <span class="n">{{ "{:,}".format(t.posts|length) }}</span>{% if t.reviewed %} <span class="n">· {{ t.reviewed|length }} reviewed</span>{% endif %}</li>
+  {% endfor %}</ul>
+</section>
+{% endblock %}

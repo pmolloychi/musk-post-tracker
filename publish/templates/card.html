@@ -1,0 +1,26 @@
+{% macro card(p, size) %}
+<article class="card {{ p.group }}">
+  <p class="provenance">
+    {% if p.group == 'sample' %}{{ (labels.sample_upheld if p.finding == 'Approved' else labels.sample_rejected).format(n=p.sample_no, size=size) }}
+    {% else %}{{ labels.selected }}{% endif %}
+  </p>
+  {% if p.context %}<blockquote class="context">{{ p.context }}</blockquote>{% endif %}
+  <p class="text">{{ p.text }}</p>
+  <p class="meta">{{ p.type }} · {{ p.date_ct }} CT{% if p.status == 'deleted' %} · <strong>{{ labels.deleted }}</strong>{% endif %}
+    · <a href="{{ p.link }}">On X</a>{% if p.archive_link %} · <a href="{{ p.archive_link }}">Archived copy</a>{% endif %}</p>
+  <dl class="ruling">
+    <dt>Claude's flag</dt><dd>{{ p.flag or 'None' }}</dd>
+    <dt>Parker's finding</dt><dd>{{ 'Upheld' if p.finding == 'Approved' else 'Not upheld' }}{% if p.harm_type %}: {{ p.harm_type }}{% endif %}{% if p.conduct %} ({{ p.conduct }}){% endif %}</dd>
+    {% if p.rationale %}<dt>Why</dt><dd>{{ p.rationale }}</dd>{% endif %}
+  </dl>
+</article>
+{% endmacro %}
+
+{% macro row(p, reviewed) %}
+<li>
+  <p class="text">{{ p.text or '(no text)' }}</p>
+  <p class="meta">{{ p.type }} · {{ p.date_ct }} CT{% if p.status == 'deleted' %} · {{ labels.deleted }}{% endif %}
+    · <a href="{{ p.link }}">On X</a>{% if p.archive_link %} · <a href="{{ p.archive_link }}">Archived</a>{% endif %}
+    · {% if reviewed %}Reviewed by Parker, see above{% else %}{{ labels.unreviewed }}{% endif %}</p>
+</li>
+{% endmacro %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "card.html" import card %}
+{% from "rate.html" import rate %}
+{% block title %}Methods: What Musk Posts About, 2026{% endblock %}
+{% block main %}
+<h1>Methods</h1>
+<div class="prose">{{ body }}</div>
+
+<h2>The numbers</h2>
+<ul>
+  <li>{{ "{:,}".format(site.meta.total_posts) }} posts from January 1 through {{ site.meta.data_through_ct }} CT.</li>
+  <li>{{ "{:,}".format(site.meta.political_posts) }} of them carry at least one political topic.</li>
+  {% if site.sample.drawn %}<li>{{ "{:,}".format(site.sample.frame_size) }} posts were flagged by Claude when the sample was drawn on {{ site.sample.drawn_at }} CT.</li>
+  <li>{{ site.sample.size }} of those were picked at random for Parker to review.</li>{% endif %}
+  {% if site.sample.complete %}<li>{{ site.sample.headline.k }} were upheld.</li>{% endif %}
+</ul>
+
+<h2>The rate</h2>
+{{ rate(site.sample) }}
+{% if site.sample.complete %}
+<p>Stricter count, where Parker's harm type matches Claude's flag: <strong>{{ site.sample.strict.k }} of {{ site.sample.strict.n }}</strong>
+({{ pct(site.sample.strict.k, site.sample.strict.n) }}, 95% range {{ pct(site.sample.strict.interval[0] * 100, 100) }}–{{ pct(site.sample.strict.interval[1] * 100, 100) }}).</p>
+{% endif %}
+
+{% if site.sample.drawn %}
+<h2>The sample lock</h2>
+<ul class="mono">
+  <li>Drawn: {{ site.sample.drawn_at }} CT</li>
+  <li>Frame: {{ site.sample.frame_size }} posts, SHA-256 {{ site.sample.frame_sha256 }}</li>
+  <li>Sample: SHA-256 {{ site.sample.sample_sha256 }}</li>
+</ul>
+<p>Locked in <a href="{{ repo_url }}/blob/main/sample/LOCK.md">sample/LOCK.md</a>{% if lock_wayback_url %}, <a href="{{ lock_wayback_url }}">archived here</a>{% endif %} before review began.
+{% if site.sample.complete %}The full list is in <a href="../data/sample.txt">sample.txt</a>; its SHA-256 matches the one above.{% else %}The list itself is published once all {{ site.sample.size }} posts are decided.{% endif %}</p>
+{% endif %}
+
+{% if site.sample.complete %}
+<h2>Every sampled post</h2>
+{% for p in site.sample.posts %}{{ card(p, site.sample.size) }}{% endfor %}
+{% if site.sample.rereviewed %}
+<h2>Re-reviewed posts</h2>
+<p>These were decided before the draw and decided again after it. Only the second decision counts.</p>
+<ul>{% for p in site.sample.rereviewed %}<li>Sample #{{ p.sample_no }}: before, {{ p.prior_finding }}; after, {{ p.finding }}.</li>{% endfor %}</ul>
+{% endif %}
+{% endif %}
+
+<h2>Missing days</h2>
+<p>The tracker has no posts for {{ site.meta.missing_days|join(' and ') }}. Monthly totals for April are low by those days.</p>
+{% endblock %}
