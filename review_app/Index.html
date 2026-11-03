@@ -163,8 +163,8 @@ function defaultConduct(p) {
   return 'Original statement';
 }
 
-// A post with no decision yet starts from Claude's flag for harm type and conduct; a past decision shows what
-// was saved. The rationale is never filled in from Claude, because the public site publishes it as Parker's words.
+// A post with no decision yet starts from Claude's flag for harm type, conduct and rationale; a past decision shows
+// what was saved. The methods page discloses that rationales start from Claude's draft.
 function prefill(p) {
   const fresh = !p.finding;
   const flags = split(p.flag);
@@ -172,7 +172,7 @@ function prefill(p) {
     fromClaude: fresh && flags.length > 0,
     harm: new Set(fresh && !p.harmType ? flags : split(p.harmType)),
     conduct: defaultConduct(p),
-    rationale: p.rationale || '',
+    rationale: p.rationale || (fresh && flags.length ? (p.flagReason || '') : ''),
   };
 }
 
@@ -220,7 +220,7 @@ function renderDetail() {
       '</div>' +
       '<label class="opts"><span class="lbl">Rationale: the sentence you would publish</span>' +
         '<textarea id="rationale" rows="3" placeholder="Musk replied &quot;…&quot; to a post claiming …, which is antisemitic because …">' + esc(pre.rationale) + '</textarea></label>' +
-      (pre.fromClaude ? '<div class="hint">Harm type and what he did are filled in from Claude\'s flag. Write the rationale in your own words.</div>' : '') +
+      (pre.fromClaude ? '<div class="hint">Harm type, what he did and the rationale are filled in from Claude\'s flag. Edit anything that isn\'t right; the rationale is published.</div>' : '') +
       '<div class="row">' +
         '<button class="btn approve" id="approve" type="button">Approve finding</button>' +
         '<button class="btn" id="reject" type="button">Reject</button>' +
