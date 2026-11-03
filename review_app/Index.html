@@ -66,6 +66,7 @@
   <div class="bar">
     <div class="brand">Musk Record <span style="font-weight:400;color:#AEB4BF">· review</span></div>
     <nav id="views" aria-label="Views">
+      <button data-view="sample" aria-pressed="false">Sample<span class="n" id="n-sample"></span></button>
       <button data-view="flagged" aria-pressed="true">AI-flagged<span class="n" id="n-flagged"></span></button>
       <button data-view="unreviewed" aria-pressed="false">All unreviewed<span class="n" id="n-unreviewed"></span></button>
       <button data-view="approved" aria-pressed="false">Approved<span class="n" id="n-approved"></span></button>
@@ -87,7 +88,7 @@
 <div id="toast" role="status"><span id="toast-msg"></span><button id="undo">Undo</button></div>
 
 <script>
-const S = { view: 'flagged', q: '', sort: 'newest', offset: 0, posts: [], total: 0, sel: -1, cfg: null, shots: new Map(), undo: null };
+const S = { view: 'flagged', q: '', sort: 'newest', offset: 0, posts: [], total: 0, sel: -1, cfg: null, shots: new Map(), undo: null, sample: null };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -102,7 +103,7 @@ async function load(keepId) {
   $('list').innerHTML = '<div class="empty">Loading…</div>';
   try {
     const r = await call('list', S.view, S.q, S.sort, S.offset);
-    S.posts = r.posts; S.total = r.total;
+    S.posts = r.posts; S.total = r.total; S.sample = r.sample;
     for (const k in r.counts) $('n-' + k).textContent = r.counts[k];
     const i = keepId ? S.posts.findIndex(p => p.id === keepId) : -1;
     S.sel = i >= 0 ? i : (S.posts.length ? 0 : -1);
@@ -113,6 +114,12 @@ async function load(keepId) {
 }
 
 function renderList() {
+  if (S.view === 'sample' && S.sample && !S.sample.drawn) {
+    $('list').innerHTML = '<div class="empty">No sample yet. Drawing it picks ' + S.sample.size + ' AI-flagged posts at random, once.' +
+      '<div style="margin-top:14px"><button class="btn approve" id="draw">Draw sample</button></div></div>';
+    $('draw').onclick = drawSample;
+    return;
+  }
   if (!S.posts.length) {
     $('list').innerHTML = '<div class="empty">Nothing here.</div>';
     return;
@@ -120,9 +127,11 @@ function renderList() {
   const html = S.posts.map((p, i) => {
     const flags = split(p.flag).map(f => '<span class="chip flag">' + esc(f) + '</span>').join('');
     const done = p.finding ? '<span class="chip ' + (p.finding === 'Approved' ? 'ok' : '') + '">' + esc(p.finding) + '</span>' : '';
+    const num = p.sampleNo ? '<span class="chip mono">Sample #' + p.sampleNo + '</span>' : '';
+    const again = p.needsRereview ? '<span class="chip warn">Needs re-review</span>' : '';
     const who = (String(p.context || '').match(/@\w+/) || [''])[0];
     return '<button class="item" data-i="' + i + '" aria-current="' + (i === S.sel) + '">' +
-      '<span class="chips"><span class="chip">' + esc(p.type) + '</span>' + flags + done + '</span>' +
+      '<span class="chips">' + num + '<span class="chip">' + esc(p.type) + '</span>' + flags + done + again + '</span>' +
       '<span class="t">' + esc(p.text) + '</span>' +
       '<span class="m"><span class="mono">' + esc(p.date) + '</span>' + (who ? ' · ' + esc(who) : '') + '</span></button>';
   }).join('');
@@ -131,7 +140,9 @@ function renderList() {
     '<span>' + (S.offset + 1) + '–' + end + ' of ' + S.total + '</span><span class="row">' +
     (S.offset > 0 ? '<button class="btn small" id="prev">Previous</button>' : '') +
     (end < S.total ? '<button class="btn small" id="next">More</button>' : '') + '</span></div>';
-  $('list').innerHTML = html + pager;
+  const counter = S.view === 'sample' && S.sample
+    ? '<div class="row hint" style="padding:0 2px 4px"><b>' + S.sample.decided + ' of ' + S.sample.size + ' decided</b></div>' : '';
+  $('list').innerHTML = counter + html + pager;
   $('list').querySelectorAll('.item').forEach(b => b.onclick = () => select(Number(b.dataset.i)));
   if ($('prev')) $('prev').onclick = () => { S.offset = Math.max(0, S.offset - 50); load(); };
   if ($('next')) $('next').onclick = () => { S.offset += 50; load(); };
@@ -152,7 +163,8 @@ function defaultConduct(p) {
   return 'Original statement';
 }
 
-// A post with no decision yet starts from Claude's flag; a past decision shows what was saved.
+// A post with no decision yet starts from Claude's flag for harm type and conduct; a past decision shows what
+// was saved. The rationale is never filled in from Claude, because the public site publishes it as Parker's words.
 function prefill(p) {
   const fresh = !p.finding;
   const flags = split(p.flag);
@@ -160,7 +172,7 @@ function prefill(p) {
     fromClaude: fresh && flags.length > 0,
     harm: new Set(fresh && !p.harmType ? flags : split(p.harmType)),
     conduct: defaultConduct(p),
-    rationale: p.rationale || (fresh ? (p.flagReason || (flags.length ? 'Flagged as ' + flags.join(', ') + '.' : '')) : ''),
+    rationale: p.rationale || '',
   };
 }
 
@@ -179,6 +191,8 @@ function renderDetail() {
   $('detail').innerHTML =
     '<div class="chips"><span class="chip">' + esc(p.type) + '</span><span class="chip mono">' + esc(p.date) + ' CT</span>' +
       '<span class="chip mono">ID ' + esc(p.id) + '</span>' + deleted +
+      (p.sampleNo ? '<span class="chip mono">Sample #' + p.sampleNo + '</span>' : '') +
+      (p.needsRereview ? '<span class="chip warn">Needs re-review: decided before the draw</span>' : '') +
       (p.finding ? '<span class="chip ' + (p.finding === 'Approved' ? 'ok' : '') + '">' + esc(p.finding) + (p.reviewedAt ? ' · ' + esc(p.reviewedAt) : '') + '</span>' : '') +
       '<span style="margin-left:auto" class="row">' + archive + (isUrl(p.link) ? '<a href="' + esc(p.link) + '" target="_blank" rel="noopener">Open on X</a>' : '') + '</span></div>' +
 
@@ -206,7 +220,7 @@ function renderDetail() {
       '</div>' +
       '<label class="opts"><span class="lbl">Rationale: the sentence you would publish</span>' +
         '<textarea id="rationale" rows="3" placeholder="Musk replied &quot;…&quot; to a post claiming …, which is antisemitic because …">' + esc(pre.rationale) + '</textarea></label>' +
-      (pre.fromClaude ? '<div class="hint">Filled in from Claude\'s flag. Change anything before you approve, or approve as is.</div>' : '') +
+      (pre.fromClaude ? '<div class="hint">Harm type and what he did are filled in from Claude\'s flag. Write the rationale in your own words.</div>' : '') +
       '<div class="row">' +
         '<button class="btn approve" id="approve" type="button">Approve finding</button>' +
         '<button class="btn" id="reject" type="button">Reject</button>' +
@@ -249,6 +263,8 @@ async function decide(finding) {
     $('err').textContent = 'To approve, pick at least one harm type, what he did, and write the rationale.';
     return;
   }
+  if (S.view === 'sample' && p.sampleDecided &&
+      !confirm('This post is already decided. Changing it changes the published upheld rate. Continue?')) return;
   const prev = { finding: p.finding || '', harm_type: split(p.harmType), conduct: p.conduct || '', rationale: p.rationale || '', reviewed_at: p.reviewedAt || '' };
   await commit(p, fields, prev, finding ? finding : 'Cleared');
 }
@@ -258,6 +274,11 @@ async function commit(p, fields, prev, label) {
   try {
     const saved = await call('save', p.id, fields);
     Object.assign(p, { finding: saved.finding, harmType: saved.harm_type, conduct: saved.conduct, rationale: saved.rationale, reviewedAt: saved.reviewed_at });
+    if (S.view === 'sample') {
+      const was = p.sampleDecided;
+      p.sampleDecided = !!saved.finding; p.needsRereview = false;
+      S.sample.decided += (p.sampleDecided ? 1 : 0) - (was ? 1 : 0);
+    }
     S.undo = { p: p, prev: prev };
     toast(label + ' and saved to the sheet.');
     const leaves = (S.view === 'flagged' || S.view === 'unreviewed') ? !!p.finding
@@ -269,6 +290,18 @@ async function commit(p, fields, prev, label) {
   } catch (e) {
     if ($('err')) $('err').textContent = 'Not saved: ' + (e.message || e);
     document.querySelectorAll('#detail .btn').forEach(b => b.disabled = false);
+  }
+}
+
+async function drawSample() {
+  if (!confirm('Draw the random sample now? This happens once and can\'t be redone.')) return;
+  $('draw').disabled = true;
+  try {
+    const r = await call('drawSample');
+    toast('Sample drawn from ' + r.frameSize + ' flagged posts.');
+    load();
+  } catch (e) {
+    $('list').innerHTML = '<div class="err">' + esc(e.message || e) + '</div>';
   }
 }
 

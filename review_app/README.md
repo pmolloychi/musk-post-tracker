@@ -17,14 +17,29 @@ After you paste a new version of either file: **Deploy > Manage deployments > ed
 
 ## Using it
 
-- **Views:** AI-flagged (flagged and not yet reviewed), All unreviewed, Approved, Rejected, Everything. Each one shows a count.
+- **Views:** Sample (see below), AI-flagged (flagged and not yet reviewed), All unreviewed, Approved, Rejected, Everything.
+  Each one shows a count.
 - **Search** looks through his text, the post he responded to, @accounts, Claude's flag reason and description, and your rationale.
 - **Approve finding** saves whatever the form holds, and needs at least one harm type, what he did, and a rationale. **Reject** needs nothing. **Skip for now**
   moves on without saving anything.
 - Saving writes Finding, Harm type, Conduct, Rationale and Reviewed at (Central time) to that post's row. An Undo link
   appears for 8 seconds after each save. **Clear decision** blanks a past decision.
-- On a post with no decision yet, harm type, what he did and the rationale are filled in from Claude's flag and flag reason.
-  Approve as is, or change any of them first. What he did comes from the post type; for replies it picks "Endorsed another post"
-  when Claude's reason says the words came from the post he replied to.
+- On a post with no decision yet, harm type and what he did are filled in from Claude's flag. The rationale always starts
+  blank: the public site publishes it as your words, so write it yourself. What he did comes from the post type; for replies
+  it picks "Endorsed another post" when Claude's reason says the words came from the post he replied to.
 - Keyboard shortcuts, when you're not typing in a box: A approves, R rejects, S skips, and J and K move down and up.
 - Reconstructed screenshots get a warning. They're cards built from API data, not X's own embed, so don't publish them as evidence.
+
+## The random sample
+
+The public site's upheld rate comes from 100 AI-flagged posts picked at random, once.
+
+- **Draw it:** open the **Sample** view and click **Draw sample**. It takes every post Claude has flagged right now, picks
+  100, and writes them to a new **Sample** tab in the sheet with the draw time, the seed and two fingerprints. It refuses to
+  run a second time. Don't edit the Sample tab by hand.
+- **Lock it in public:** copy `drawn_at`, `frame_size`, `frame_sha256` and `sample_sha256` from the Sample tab into
+  `sample/LOCK.md` in the repo, commit it, and save the file's GitHub page on the Wayback Machine. The runbook
+  (`publish/RUNBOOK.md`) has the exact steps.
+- **Review it:** the Sample view lists the 100 posts in order with a "k of 100 decided" counter. Only a decision made after the
+  draw counts. A post you'd decided before the draw shows **Needs re-review** and starts with a fresh form.
+- Changing a decided sample post asks you to confirm first, because it changes the published rate.
