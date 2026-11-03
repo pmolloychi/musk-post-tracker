@@ -1,0 +1,65 @@
+name: Publish public site
+
+on:
+  schedule:
+    - cron: "30 11 * * *" # UTC, after the 10:37 deleted-post check starts (it can run 45 minutes)
+  workflow_dispatch:
+
+# Until the repository variable PUBLISH_ENABLED is "true", runs check and build but push nothing.
+# The repository is public, so pushing the site branch would publish the data even with Pages off.
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: publish/requirements.txt
+      - run: pip install -r publish/requirements.txt
+      - name: Previous snapshot
+        run: |
+          if git fetch --depth 1 origin +refs/heads/site:refs/remotes/origin/site 2>/dev/null; then
+            git show origin/site:data/meta.json > prev-meta.json || true
+          fi
+      - name: Build
+        env:
+          SHEET_ENDPOINT: ${{ secrets.SHEET_ENDPOINT }}
+          SHEET_SECRET: ${{ secrets.SHEET_SECRET }}
+        run: python publish/build.py --previous prev-meta.json
+      - name: Not published yet
+        if: vars.PUBLISH_ENABLED != 'true'
+        run: echo "Built and checked. PUBLISH_ENABLED isn't true, so nothing was pushed." >> "$GITHUB_STEP_SUMMARY"
+      - name: Push to the site branch
+        if: vars.PUBLISH_ENABLED == 'true'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse --verify -q origin/site >/dev/null; then
+            git worktree add site-out origin/site
+            git -C site-out checkout -B site
+          else
+            git worktree add --detach site-out
+            git -C site-out checkout --orphan site
+          fi
+          git -C site-out rm -rqf --ignore-unmatch .
+          cp -a _site/. site-out/
+          git -C site-out add -A -f
+          if git -C site-out diff --cached --quiet; then
+            echo "No changes since the last snapshot." >> "$GITHUB_STEP_SUMMARY"
+          else
+            through=$(python -c "import json;print(json.load(open('_site/data/meta.json'))['data_through_ct'])")
+            git -C site-out commit -qm "Snapshot $(date -u +%F), data through ${through} CT"
+            git -C site-out push origin site
+            echo "Published: data through ${through} CT." >> "$GITHUB_STEP_SUMMARY"
+          fi

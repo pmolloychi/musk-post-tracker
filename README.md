@@ -87,6 +87,20 @@ Retweets are skipped. Run it any time with the `check_deleted` box.
 To re-run topics and flags on every existing row (after changing the category list or the prompt), tick `relabel_existing`.
 It uses the text already in the sheet and costs one Claude call per 40 rows.
 
+## Public site
+
+A static site, **What Musk Posts About**, charts how much of Musk's 2026 posting is political and lists the posts behind
+every number. `publish/` builds it once a day (`.github/workflows/publish.yml`, 11:30 UTC) from the sheet's read-only
+`export` action and pushes it to the `site` branch, which GitHub Pages serves.
+
+- Only public fields leave the sheet. Claude's flag reasons and descriptions never do. Review fields go out only for
+  approved findings and, once all 100 are decided, the random sample. The build stops if any other field shows up.
+- Publishing is off until the repository variable `PUBLISH_ENABLED` is `true`. Until then, runs check and build but push
+  nothing.
+- Build it locally from saved data: `python publish/build.py --fixture tests/fixtures/export_complete.json`, then open
+  `_site/index.html`.
+- What to do when a run fails, and how to lock the sample and launch: [`publish/RUNBOOK.md`](publish/RUNBOOK.md).
+
 ## Costs and limits (checked Oct 24, 2026)
 
 - GetXAPI: $0.001 per page of about 20 posts. Hourly runs come to roughly $1 to $3 a month.
