@@ -33,7 +33,7 @@ function doGet() {
 function config() {
   const s = readSample_();
   return { harmTypes: HARM_TYPES, conducts: CONDUCTS,
-           sample: { drawn: !!s, decided: s ? sampleState_(s).decided : 0, size: SAMPLE_SIZE } };
+           sample: Object.assign(sampleInfo_(s), { decided: s ? sampleState_(s).decided : 0 }) };
 }
 
 // Every row as {header: display value}, found by header name so column moves don't matter.
@@ -97,7 +97,7 @@ function list(view, query, sort, offset) {
   }
   const start = Math.max(0, Number(offset) || 0);
   return { counts: counts, total: out.length, offset: start, posts: out.slice(start, start + PAGE_SIZE),
-           sample: { drawn: !!s, decided: state ? state.decided : 0, size: SAMPLE_SIZE } };
+           sample: Object.assign(sampleInfo_(s), { decided: state ? state.decided : 0 }) };
 }
 
 // ---------- Random sample ----------
@@ -168,41 +168,137 @@ function sha256Hex_(text) {
     .map(b => ('0' + (b & 255).toString(16)).slice(-2)).join('');
 }
 
-// Draws the sample once. The frame is every post Claude has flagged right now, by sorted Post ID. Posts are
-// ranked by SHA-256 of "seed:id" and the first 100 taken, so anyone with the seed and the frame can redo the draw.
+// The draw has two steps, so its random number comes from a public source nobody controls:
+//   1. freezeFrame() fixes the frame (every post Claude has flagged right now) and records its size and SHA-256.
+//   2. Those two values, plus a future minute, are committed publicly in sample/LOCK.md on GitHub.
+//   3. Once that minute has passed, drawSample() reads LOCK.md, checks it was committed before that minute and
+//      matches the frozen frame, fetches the NIST Randomness Beacon pulse for that minute, and uses its output
+//      as the seed. Posts are ranked by SHA-256 of "seed:id" and the first 100 taken, so anyone with the seed and
+//      the frame can redo the draw.
+// The frame's IDs are kept in column G of the Sample tab, from row 8 down, so the draw uses exactly that frame.
+const FRAME_COL = 7;
+const LOCK_RAW_URL = 'https://raw.githubusercontent.com/pmolloychi/musk-post-tracker/main/sample/LOCK.md';
+const LOCK_COMMITS_URL = 'https://api.github.com/repos/pmolloychi/musk-post-tracker/commits?path=sample/LOCK.md&per_page=100';
+const BEACON_URL = 'https://beacon.nist.gov/beacon/2.0/pulse/time/';
+
+// The frozen frame, or null. Present between freezeFrame() and drawSample(), and kept after the draw.
+function readFrozen_() {
+  const sh = sampleSheet_();
+  if (!sh || String(sh.getRange(1, 4).getValue()).trim() !== 'frozen_at') return null;
+  const n = Number(sh.getRange(3, 2).getValue());
+  const ids = n ? sh.getRange(SAMPLE_FIRST_ROW, FRAME_COL, n, 1).getDisplayValues().map(r => String(r[0]).trim()) : [];
+  return { frozenAt: ctMinute_(sh.getRange(1, 5).getValue()), frameSize: n,
+           frameSha: String(sh.getRange(4, 2).getValue()).trim(), ids: ids };
+}
+
+function sampleInfo_(s) {
+  const f = readFrozen_();
+  return { drawn: !!s, size: SAMPLE_SIZE,
+           frozen: f ? { frozenAt: f.frozenAt, frameSize: f.frameSize, frameSha: f.frameSha } : null };
+}
+
+// Step 1. An earlier draw (made without a public lock) is kept, renamed, so nothing is lost.
+function freezeFrame() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (readSample_() && readFrozen_()) throw new Error('The sample has already been drawn.');
+    if (readFrozen_()) throw new Error('The frame is already frozen. Publish the lock, then draw.');
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const old = ss.getSheetByName(SAMPLE_SHEET);
+    if (old) {
+      const drawnAt = ctMinute_(old.getRange(1, 2).getValue()) || 'undated';
+      old.setName('Sample (superseded ' + drawnAt.slice(0, 10) + ')');
+    }
+    const sh = ss.insertSheet(SAMPLE_SHEET);
+    const frame = readRows_().map(toPost_).filter(isFlagged_).map(p => p.id).sort();
+    if (frame.length < SAMPLE_SIZE) throw new Error('Only ' + frame.length + ' flagged posts; the sample needs ' + SAMPLE_SIZE + '.');
+    const frozenAt = Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd HH:mm');
+    const frameSha = sha256Hex_(frame.join('\n'));
+    const head = [
+      ['drawn_at', '', '', 'frozen_at', frozenAt],
+      ['seed', '', '', 'beacon_pulse_utc', ''],
+      ['frame_size', String(frame.length), '', 'beacon_pulse_url', ''],
+      ['frame_sha256', frameSha, '', '', ''],
+      ['sample_sha256', '', '', '', ''],
+      ['', '', '', '', ''],
+      ['sample_no', 'post_id', 'flag_at_draw', 'prior_finding', 'prior_reviewed_at'],
+    ];
+    sh.getRange(1, 1, head.length, 5).setNumberFormat('@').setValues(head);
+    sh.getRange(SAMPLE_FIRST_ROW - 1, FRAME_COL).setValue('frame_post_id');
+    sh.getRange(SAMPLE_FIRST_ROW, FRAME_COL, frame.length, 1).setNumberFormat('@').setValues(frame.map(id => [id]));
+    return { frozenAt: frozenAt, frameSize: frame.length, frameSha: frameSha };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function fetchText_(url) {
+  const r = UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: { 'Cache-Control': 'no-cache' } });
+  if (r.getResponseCode() !== 200) throw new Error('Could not read ' + url + ' (HTTP ' + r.getResponseCode() + ').');
+  return r.getContentText();
+}
+
+// "- beacon_pulse_utc: 2026-11-04T20:00:00Z" style lines in LOCK.md.
+function lockValue_(text, key) {
+  const m = text.match(new RegExp('^\\s*[-*]?\\s*`?' + key + '`?\\s*:\\s*`?([^`\\s]+)`?\\s*$', 'm'));
+  return m ? m[1].trim() : '';
+}
+
+// Step 3.
 function drawSample() {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
     if (readSample_()) throw new Error('The sample has already been drawn. It can only be drawn once.');
-    const ss = SpreadsheetApp.openById(SHEET_ID);
-    const sh = ss.getSheetByName(SAMPLE_SHEET) || ss.insertSheet(SAMPLE_SHEET);
-    if (sh.getLastRow() > 0) throw new Error('The Sample tab already has something in it. Empty it first.');
-    const posts = readRows_().map(toPost_);
-    const frame = posts.filter(isFlagged_).map(p => p.id).sort();
-    if (frame.length < SAMPLE_SIZE) throw new Error('Only ' + frame.length + ' flagged posts; the sample needs ' + SAMPLE_SIZE + '.');
-    const seed = Utilities.getUuid().replace(/-/g, '').toLowerCase();
-    const ranked = frame.map(id => ({ id: id, h: sha256Hex_(seed + ':' + id) }))
+    const f = readFrozen_();
+    if (!f) throw new Error('Freeze the frame first.');
+    if (f.ids.length !== f.frameSize || sha256Hex_(f.ids.join('\n')) !== f.frameSha) {
+      throw new Error('The frozen frame in the Sample tab has been changed. Don\'t edit that tab by hand.');
+    }
+    const lockText = fetchText_(LOCK_RAW_URL + '?t=' + Date.now());
+    if (lockValue_(lockText, 'frame_sha256') !== f.frameSha || Number(lockValue_(lockText, 'frame_size')) !== f.frameSize) {
+      throw new Error('sample/LOCK.md on GitHub doesn\'t match the frozen frame. Check the values in it.');
+    }
+    const pulseIso = lockValue_(lockText, 'beacon_pulse_utc');
+    const pulseMs = Date.parse(pulseIso);
+    if (!pulseIso || isNaN(pulseMs) || pulseMs % 60000 !== 0) throw new Error('LOCK.md has no valid beacon_pulse_utc minute.');
+    if (Date.now() < pulseMs + 60000) {
+      throw new Error('Too early. The draw opens one minute after ' + pulseIso + ' (' +
+        Utilities.formatDate(new Date(pulseMs), 'America/Chicago', 'MMM d, h:mm a') + ' CT).');
+    }
+    // Every commit that touched LOCK.md must predate the pulse, so its values were public before the seed existed.
+    // GitHub limits unsigned API calls by IP, and Google's IPs are shared, so a refused call is noted, not fatal:
+    // the Wayback capture and GitHub's own history still show when LOCK.md went up.
+    let commitCheck = 'skipped: GitHub API unavailable';
+    const cr = UrlFetchApp.fetch(LOCK_COMMITS_URL, { muteHttpExceptions: true });
+    if (cr.getResponseCode() === 200) {
+      const commits = JSON.parse(cr.getContentText());
+      if (!commits.length) throw new Error('GitHub shows no commit of sample/LOCK.md.');
+      if (commits.some(c => Date.parse(c.commit.committer.date) >= pulseMs)) {
+        throw new Error('sample/LOCK.md was changed at or after the pulse time, so it can\'t be used.');
+      }
+      commitCheck = 'passed';
+    }
+    const pulse = JSON.parse(fetchText_(BEACON_URL + pulseMs)).pulse;
+    if (!pulse || Date.parse(pulse.timeStamp) !== pulseMs) throw new Error('The beacon has no pulse for exactly ' + pulseIso + '.');
+    const seed = String(pulse.outputValue).toLowerCase();
+    const ranked = f.ids.map(id => ({ id: id, h: sha256Hex_(seed + ':' + id) }))
       .sort((a, b) => (a.h < b.h ? -1 : a.h > b.h ? 1 : 0)).slice(0, SAMPLE_SIZE);
     const ids = ranked.map(x => x.id);
     const byId = {};
-    posts.forEach(p => { byId[p.id] = p; });
+    readRows_().map(toPost_).forEach(p => { byId[p.id] = p; });
     const at = reviewedAtById_();
     const drawnAt = Utilities.formatDate(new Date(), 'America/Chicago', 'yyyy-MM-dd HH:mm');
-    const head = [
-      ['drawn_at', drawnAt, '', '', ''],
-      ['seed', seed, '', '', ''],
-      ['frame_size', String(frame.length), '', '', ''],
-      ['frame_sha256', sha256Hex_(frame.join('\n')), '', '', ''],
-      ['sample_sha256', sha256Hex_(ids.join('\n') + '\nseed:' + seed + '\n'), '', '', ''],
-      ['', '', '', '', ''],
-      ['sample_no', 'post_id', 'flag_at_draw', 'prior_finding', 'prior_reviewed_at'],
-    ];
-    const rows = ids.map((id, i) => [String(i + 1), id, byId[id].flag || '', byId[id].finding || '', at[id] || '']);
-    const all = head.concat(rows);
-    // Plain text first, so IDs and times are stored exactly as written.
-    sh.getRange(1, 1, all.length, 5).setNumberFormat('@').setValues(all);
-    return { drawnAt: drawnAt, frameSize: frame.length };
+    const sh = sampleSheet_();
+    sh.getRange(1, 2, 2, 1).setNumberFormat('@').setValues([[drawnAt], [seed]]);
+    sh.getRange(5, 2).setNumberFormat('@').setValue(sha256Hex_(ids.join('\n') + '\nseed:' + seed + '\n'));
+    sh.getRange(2, 5, 2, 1).setNumberFormat('@').setValues([[pulseIso], [pulse.uri || (BEACON_URL + pulseMs)]]);
+    sh.getRange(4, 4, 1, 2).setNumberFormat('@').setValues([['lock_commit_check', commitCheck]]);
+    const rows = ids.map((id, i) => [String(i + 1), id, (byId[id] && byId[id].flag) || '',
+                                     (byId[id] && byId[id].finding) || '', at[id] || '']);
+    sh.getRange(SAMPLE_FIRST_ROW, 1, rows.length, 5).setNumberFormat('@').setValues(rows);
+    return { drawnAt: drawnAt, frameSize: f.frameSize };
   } finally {
     lock.releaseLock();
   }

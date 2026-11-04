@@ -66,13 +66,16 @@ new version the same way.
 
 ## Lock the random sample
 
-Do this once, right after clicking **Draw sample** in the review app, and before reviewing any sample post.
+The draw takes three steps, so its random number comes from a public source nobody controls. Don't review any sample
+post until step 3 is done; decisions made before the draw don't count anyway.
 
-1. Open the sheet's **Sample** tab. Copy B1 (`drawn_at`), B3 (`frame_size`), B4 (`frame_sha256`) and B5
-   (`sample_sha256`). Don't copy the seed (B2) or any post IDs: they stay private until the sample is finished.
-2. Create `sample/LOCK.md` in the repo with those four values, and commit it to `main`.
-3. Open the file's GitHub page and save it at https://web.archive.org/save. Copy the archive link it gives you.
-4. Put that link in `publish/config.py` as `LOCK_WAYBACK_URL` and commit.
+1. In the review app's **Sample** view, click **Freeze the pool**. It shows `frame_size` and `frame_sha256`.
+2. Copy `sample/LOCK.template.md` to `sample/LOCK.md` and fill in `frozen_at_ct`, those two values, and a
+   `beacon_pulse_utc` minute at least an hour after you'll commit (for example `2026-11-04T21:00:00Z`). Commit it to
+   `main`, then save its GitHub page at https://web.archive.org/save and put the archive link in `publish/config.py` as
+   `LOCK_WAYBACK_URL`. All of this must happen before that minute.
+3. After that minute, click **Draw sample**. The app checks LOCK.md against the frozen pool, refuses if LOCK.md changed
+   at or after the pulse minute, and fetches the beacon value itself.
 
 ## Launch
 
