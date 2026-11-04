@@ -115,9 +115,21 @@ async function load(keepId) {
 
 function renderList() {
   if (S.view === 'sample' && S.sample && !S.sample.drawn) {
-    $('list').innerHTML = '<div class="empty">No sample yet. Drawing it picks ' + S.sample.size + ' AI-flagged posts at random, once.' +
-      '<div style="margin-top:14px"><button class="btn approve" id="draw">Draw sample</button></div></div>';
-    $('draw').onclick = drawSample;
+    const f = S.sample.frozen;
+    if (!f) {
+      $('list').innerHTML = '<div class="empty">No sample yet. Step 1 freezes the pool: every post Claude has flagged right now. ' +
+        'Then the pool\'s fingerprint goes public, and the draw uses a public random number from a later minute.' +
+        '<div style="margin-top:14px"><button class="btn approve" id="freeze">Freeze the pool</button></div></div>';
+      $('freeze').onclick = freezeFrame;
+    } else {
+      $('list').innerHTML = '<div class="empty">Pool frozen at ' + esc(f.frozenAt) + ' CT.<br>' +
+        'Send Claude these two values so the lock can be published:<br>' +
+        '<code style="user-select:all">frame_size: ' + esc(f.frameSize) + '</code><br>' +
+        '<code style="user-select:all;word-break:break-all">frame_sha256: ' + esc(f.frameSha) + '</code><br>' +
+        'Once the lock is on GitHub and its draw time has passed, click Draw sample.' +
+        '<div style="margin-top:14px"><button class="btn approve" id="draw">Draw sample</button></div></div>';
+      $('draw').onclick = drawSample;
+    }
     return;
   }
   if (!S.posts.length) {
@@ -290,6 +302,20 @@ async function commit(p, fields, prev, label) {
   } catch (e) {
     if ($('err')) $('err').textContent = 'Not saved: ' + (e.message || e);
     document.querySelectorAll('#detail .btn').forEach(b => b.disabled = false);
+  }
+}
+
+async function freezeFrame() {
+  if (!confirm('Freeze the pool now? Any earlier sample is kept but renamed, and stops counting.')) return;
+  $('freeze').disabled = true;
+  try {
+    const r = await call('freezeFrame');
+    toast('Pool frozen: ' + r.frameSize + ' flagged posts.');
+    const cfg = await call('config');
+    S.sample = cfg.sample;
+    renderList();
+  } catch (e) {
+    $('list').innerHTML = '<div class="err">' + esc(e.message || e) + '</div>';
   }
 }
 

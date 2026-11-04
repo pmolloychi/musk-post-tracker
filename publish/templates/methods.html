@@ -29,7 +29,7 @@
   <li>Frame: {{ site.sample.frame_size }} posts, SHA-256 {{ site.sample.frame_sha256 }}</li>
   <li>Sample: SHA-256 {{ site.sample.sample_sha256 }}</li>
 </ul>
-<p>Locked in <a href="{{ repo_url }}/blob/main/sample/LOCK.md">sample/LOCK.md</a>{% if lock_wayback_url %}, <a href="{{ lock_wayback_url }}">archived here</a>{% endif %} before review began.
+<p>Locked in <a href="{{ repo_url }}/blob/main/sample/LOCK.md">sample/LOCK.md</a>{% if lock_wayback_url %}, <a href="{{ lock_wayback_url }}">archived here</a>{% endif %} before the beacon pulse that seeded the draw.
 {% if site.sample.complete %}The full list is in <a href="../data/sample.txt">sample.txt</a>; its SHA-256 matches the one above.{% else %}The list itself is published once all {{ site.sample.size }} posts are decided.{% endif %}</p>
 {% endif %}
 

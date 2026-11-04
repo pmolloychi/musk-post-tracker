@@ -35,12 +35,10 @@ After you paste a new version of either file: **Deploy > Manage deployments > ed
 
 The public site's upheld rate comes from 100 AI-flagged posts picked at random, once.
 
-- **Draw it:** open the **Sample** view and click **Draw sample**. It takes every post Claude has flagged right now, picks
-  100, and writes them to a new **Sample** tab in the sheet with the draw time, the seed and two fingerprints. It refuses to
-  run a second time. Don't edit the Sample tab by hand.
-- **Lock it in public:** copy `drawn_at`, `frame_size`, `frame_sha256` and `sample_sha256` from the Sample tab into
-  `sample/LOCK.md` in the repo, commit it, and save the file's GitHub page on the Wayback Machine. The runbook
-  (`publish/RUNBOOK.md`) has the exact steps.
+- **Draw it:** three steps, in `publish/RUNBOOK.md` under "Lock the random sample": freeze the pool, publish
+  `sample/LOCK.md` with a future beacon minute, then click **Draw sample** after that minute. The seed is the NIST
+  Randomness Beacon value for that minute, so nobody controls it. An earlier Sample tab is kept, renamed "superseded".
+  Don't edit the Sample tab by hand.
 - **Review it:** the Sample view lists the 100 posts in order with a "k of 100 decided" counter. Only a decision made after the
   draw counts. A post you'd decided before the draw shows **Needs re-review** and starts with a fresh form.
 - Changing a decided sample post asks you to confirm first, because it changes the published rate.
