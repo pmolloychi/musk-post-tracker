@@ -80,9 +80,11 @@ Quoted with comment, Retweeted or empty. Fields left out are left unchanged. The
 data when the embed wouldn't load; don't publish these as evidence).
 
 **Status** is set by a daily check at 10:37 UTC that asks X's free oEmbed endpoint whether each post from the last 14 days
-still exists; on Sundays it checks every row. Missing posts get "Deleted (noticed YYYY-MM-DD)". X answers the same way for
+still exists. A separate Sunday run (08:17 UTC, up to about 5.5 hours, alongside the hourly collection) checks every row.
+Both save results every 200 changes, so a run that's cut off keeps what it checked, and the log lists each newly
+missing post. Missing posts get "Deleted (noticed YYYY-MM-DD)". X answers the same way for
 deleted posts and posts withheld or hidden from logged-out viewers, so "Deleted" means "no longer publicly visible".
-Retweets are skipped. Run it any time with the `check_deleted` box.
+Retweets are skipped. Run it any time with the `check_deleted` box (last 14 days) or the `full_sweep` box (every row).
 
 To re-run topics and flags on every existing row (after changing the category list or the prompt), tick `relabel_existing`.
 It uses the text already in the sheet and costs one Claude call per 40 rows.

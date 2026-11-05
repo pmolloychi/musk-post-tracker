@@ -144,3 +144,22 @@ def test_relabel_and_check_deleted(monkeypatch):
     assert statuses["1"].startswith("Deleted (noticed ")
     assert "2" not in statuses
     assert statuses["3"] == "Live (was missing; noticed 2099-01-01)"
+
+
+def test_check_deleted_saves_as_it_goes_and_stops_at_time_limit(monkeypatch):
+    rows = [{"post_id": str(i), "type": "Reply", "text": "t", "date_ct": "2026-01-01 10:00", "status": ""} for i in range(450)]
+    calls = []
+    monkeypatch.setattr(collect, "sheet_call", lambda a, p=None: {"rows": rows} if a == "rows" else calls.append((a, p)) or {"updated": 1})
+    monkeypatch.setattr(collect, "post_is_live", lambda pid: pid != "5")
+    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
+    collect.check_deleted(full_sweep=False)  # old posts are outside the 14-day window
+    assert calls == []
+    collect.check_deleted(full_sweep=True)
+    assert [len(p["rows"]) for _, p in calls] == [200, 200, 50]
+    assert {r["post_id"]: r["status"] for _, p in calls for r in p["rows"]}["5"].startswith("Deleted (noticed ")
+
+    calls.clear()
+    clock = iter(range(0, 10_000, 60))  # each monotonic() call moves a minute on
+    monkeypatch.setattr(collect.time, "monotonic", lambda: next(clock))
+    collect.check_deleted(full_sweep=True, max_minutes=3)
+    assert sum(len(p["rows"]) for _, p in calls) < 450 and calls  # stopped early, but kept what it checked
