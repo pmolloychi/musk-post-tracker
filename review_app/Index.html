@@ -114,6 +114,8 @@ async function load(keepId) {
 }
 
 function renderList() {
+  // A sample drawn before the public lock existed has no frozen pool. Offer to start over; the old one is kept, renamed.
+  const unlocked = S.view === 'sample' && S.sample && S.sample.drawn && !S.sample.frozen;
   if (S.view === 'sample' && S.sample && !S.sample.drawn) {
     const f = S.sample.frozen;
     if (!f) {
@@ -154,7 +156,12 @@ function renderList() {
     (end < S.total ? '<button class="btn small" id="next">More</button>' : '') + '</span></div>';
   const counter = S.view === 'sample' && S.sample
     ? '<div class="row hint" style="padding:0 2px 4px"><b>' + S.sample.decided + ' of ' + S.sample.size + ' decided</b></div>' : '';
-  $('list').innerHTML = counter + html + pager;
+  const restart = unlocked
+    ? '<div class="empty" style="padding:12px 10px">This sample was drawn before the public lock, so it can\'t be proven it came first. ' +
+      'Freeze a new pool to start a locked sample. This one is kept as a renamed tab and stops counting.' +
+      '<div style="margin-top:10px"><button class="btn approve" id="freeze">Freeze the pool</button></div></div>' : '';
+  $('list').innerHTML = restart + counter + html + pager;
+  if ($('freeze')) $('freeze').onclick = freezeFrame;
   $('list').querySelectorAll('.item').forEach(b => b.onclick = () => select(Number(b.dataset.i)));
   if ($('prev')) $('prev').onclick = () => { S.offset = Math.max(0, S.offset - 50); load(); };
   if ($('next')) $('next').onclick = () => { S.offset += 50; load(); };
