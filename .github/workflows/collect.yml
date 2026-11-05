@@ -3,7 +3,8 @@ name: Collect Musk posts
 on:
   schedule:
     - cron: "7 * * * *"   # hourly; GitHub may start scheduled runs a few minutes late
-    - cron: "37 10 * * *" # daily deleted-post check (all posts on Sundays)
+    - cron: "37 10 * * *" # daily deleted-post check (last 14 days)
+    - cron: "17 8 * * 0"  # weekly deleted-post sweep of every post (Sundays, up to ~5.5 hours)
   workflow_dispatch:
     inputs:
       backfill_pages:
@@ -20,7 +21,11 @@ on:
         type: boolean
         default: false
       check_deleted:
-        description: "Check recent posts for deletion now"
+        description: "Check the last 14 days of posts for deletion now"
+        type: boolean
+        default: false
+      full_sweep:
+        description: "Check every post in the sheet for deletion now (takes a few hours)"
         type: boolean
         default: false
       refresh_existing:
@@ -30,13 +35,14 @@ on:
 
 concurrency:
   # Date backfills get their own group, so several ranges can run side by side without blocking the hourly run.
-  group: ${{ github.event.inputs.backfill_since && format('backfill-{0}-{1}', github.event.inputs.backfill_since, github.event.inputs.backfill_until) || 'collect' }}
+  # The full deletion sweep also gets its own group, so the hourly run keeps collecting while it works.
+  group: ${{ github.event.inputs.backfill_since && format('backfill-{0}-{1}', github.event.inputs.backfill_since, github.event.inputs.backfill_until) || (github.event.schedule == '17 8 * * 0' || github.event.inputs.full_sweep == 'true') && 'deleted-sweep' || 'collect' }}
   cancel-in-progress: false
 
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ github.event.inputs.backfill_since != '' && github.event.inputs.backfill_since != null && 340 || 45 }}
+    timeout-minutes: ${{ (github.event.inputs.backfill_since != '' && github.event.inputs.backfill_since != null || github.event.schedule == '17 8 * * 0' || github.event.inputs.full_sweep == 'true') && 340 || 45 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -61,7 +67,8 @@ jobs:
           BACKFILL_PAGES: ${{ github.event.inputs.backfill_pages }}
           REFRESH: ${{ github.event.inputs.refresh_existing }}
           RELABEL: ${{ github.event.inputs.relabel_existing }}
-          CHECK_DELETED: ${{ github.event.schedule == '37 10 * * *' || github.event.inputs.check_deleted == 'true' }}
+          CHECK_DELETED: ${{ github.event.schedule == '37 10 * * *' || github.event.schedule == '17 8 * * 0' || github.event.inputs.check_deleted == 'true' || github.event.inputs.full_sweep == 'true' }}
+          FULL_SWEEP: ${{ github.event.schedule == '17 8 * * 0' || github.event.inputs.full_sweep == 'true' }}
           BACKFILL_SINCE: ${{ github.event.inputs.backfill_since }}
           BACKFILL_UNTIL: ${{ github.event.inputs.backfill_until }}
         run: python collect.py

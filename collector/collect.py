@@ -498,29 +498,49 @@ def post_is_live(post_id):
     return False
 
 
-def check_deleted(full_sweep):
-    """Mark posts Deleted when X no longer serves them. Daily: the last 14 days. Weekly: everything."""
+def check_deleted(full_sweep, max_minutes=None):
+    """Mark posts Deleted when X no longer serves them. Daily: the last 14 days. Weekly: everything.
+
+    Results are saved every 200 changes, so a run that is cut off still keeps what it checked.
+    """
+    started = time.monotonic()
     today = datetime.now(CENTRAL).strftime("%Y-%m-%d")
     cutoff = (datetime.now(CENTRAL) - timedelta(days=14)).strftime("%Y-%m-%d")
-    changes, checked = [], 0
-    for e in sheet_call("rows")["rows"]:
-        if e["type"] == "Retweet":
-            continue  # a retweet's row points at someone else's post; its liveness says little about him
-        if not full_sweep and e["date_ct"][:10] < cutoff:
-            continue
+    rows = [e for e in sheet_call("rows")["rows"]
+            if e["type"] != "Retweet"  # a retweet's row points at someone else's post; its liveness says little about him
+            and (full_sweep or e["date_ct"][:10] >= cutoff)]
+    print(f"{'Full sweep' if full_sweep else 'Last 14 days'}: {len(rows)} posts to check")
+    changes, checked, unclear, missing = [], 0, 0, 0
+
+    def flush():
+        if changes:
+            sheet_call("set_status", {"rows": list(changes)})
+            changes.clear()
+
+    for e in rows:
+        if max_minutes and time.monotonic() - started > max_minutes * 60:
+            print(f"Stopped at the time limit; last post checked: {e['post_id']} ({e['date_ct']})")
+            break
         live = post_is_live(e["post_id"])
         checked += 1
         time.sleep(0.3)
         status = e.get("status") or ""
-        if live is False and not status.startswith("Deleted"):
+        if live is None:
+            unclear += 1
+        elif live is False and not status.startswith("Deleted"):
             changes.append({"post_id": e["post_id"], "status": f"Deleted (noticed {today})"})
+            missing += 1
+            print(f"Missing: {e['post_id']} ({e['date_ct']}) {e.get('text', '')[:80]!r}")
         elif live is True and status.startswith("Deleted"):
             changes.append({"post_id": e["post_id"], "status": f"Live (was missing; {status[len('Deleted '):].strip('()')})"})
         elif live is True and not status:
             changes.append({"post_id": e["post_id"], "status": "Live"})
-    for i in range(0, len(changes), 200):
-        sheet_call("set_status", {"rows": changes[i:i + 200]})
-    print(f"Checked {checked} posts; {sum(c['status'].startswith('Deleted') for c in changes)} newly missing")
+        if len(changes) >= 200:
+            flush()
+        if checked % 1000 == 0:
+            print(f"...{checked}/{len(rows)} checked, {missing} newly missing")
+    flush()
+    print(f"Checked {checked} of {len(rows)} posts; {missing} newly missing; {unclear} got no clear answer from X")
 
 
 def search_day(day):
@@ -591,7 +611,8 @@ def main():
     if os.environ.get("RELABEL") == "true":
         return relabel_existing()
     if os.environ.get("CHECK_DELETED") == "true":
-        return check_deleted(full_sweep=datetime.now(CENTRAL).weekday() == 6)
+        full = os.environ.get("FULL_SWEEP") == "true"
+        return check_deleted(full_sweep=full, max_minutes=320 if full else 40)
     if os.environ.get("BACKFILL_SINCE"):
         until = os.environ.get("BACKFILL_UNTIL") or datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d")
         return backfill_days(os.environ["BACKFILL_SINCE"], until)
